@@ -15,71 +15,164 @@
 <body>
     <div id="game-container"></div>
     <script>
-    // Проверка, что библиотеки загрузились
-    window.onload = function() {
-        if (typeof Phaser === 'undefined') {
-            alert("Библиотека Phaser не загружена! Проверь первую ссылку.");
-            return;
-        }
-
         const tg = window.Telegram.WebApp;
-        tg.ready();
-        tg.expand();
+tg.ready();
+tg.expand();
 
-        const config = {
-            type: Phaser.AUTO,
-            width: window.innerWidth,
-            height: window.innerHeight,
-            parent: 'game-container',
-            physics: { default: 'arcade', arcade: { debug: false } },
-            scene: { preload, create, update }
-        };
+const config = {
+    type: Phaser.AUTO,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    parent: 'game-container',
+    physics: { default: 'arcade', arcade: { debug: false } },
+    scene: { preload, create, update }
+};
 
-        const game = new Phaser.Game(config);
-        let player, bullets, clouds, score = 0, scoreText;
+const game = new Phaser.Game(config);
 
-        function preload() {
-            let g = this.make.graphics({ x: 0, y: 0, add: false });
-            g.fillStyle(0xffff00, 1).fillCircle(16, 16, 16);
-            g.generateTexture('sun', 32, 32); g.clear();
-            g.fillStyle(0xffffff, 1).fillRect(0, 0, 4, 12);
-            g.generateTexture('bullet', 4, 12); g.clear();
-            g.fillStyle(0xeeeeee, 1).fillEllipse(20, 15, 40, 30);
-            g.generateTexture('cloud', 40, 30);
-        }
+let player, bullets, clouds, bonuses, boss;
+let score = 0, level = 1, hp = 3;
+let scoreText, levelText, hpText;
+let isBossAlive = false;
+let weaponLevel = 1; // 1 - обычный, 2 - тройной
 
-        function create() {
-            player = this.physics.add.sprite(config.width/2, config.height-100, 'sun').setCollideWorldBounds(true);
-            bullets = this.physics.add.group();
-            clouds = this.physics.add.group();
-            scoreText = this.add.text(20, 40, 'Score: 0', { fontSize: '24px', fill: '#fff' });
+function preload() {
+    let g = this.make.graphics({ x: 0, y: 0, add: false });
+    // Солнце
+    g.fillStyle(0xffff00, 1).fillCircle(16, 16, 16);
+    g.generateTexture('sun', 32, 32); g.clear();
+    // Пуля
+    g.fillStyle(0xffffff, 1).fillRect(0, 0, 4, 12);
+    g.generateTexture('bullet', 4, 12); g.clear();
+    // Тучка (обычная)
+    g.fillStyle(0xeeeeee, 1).fillEllipse(20, 15, 40, 30);
+    g.generateTexture('cloud1', 40, 30); g.clear();
+    // Тучка (тяжелая - Уровень 2)
+    g.fillStyle(0x888888, 1).fillEllipse(20, 15, 40, 30);
+    g.generateTexture('cloud2', 40, 30); g.clear();
+    // Бонус (Радужная капля)
+    g.fillStyle(0x00ff00, 1).fillCircle(10, 10, 10);
+    g.generateTexture('bonus', 20, 20); g.clear();
+    // БОСС 1
+    g.fillStyle(0x444444, 1).fillCircle(40, 40, 40);
+    g.generateTexture('boss1', 80, 80);
+}
 
-            this.time.addEvent({
-                delay: 400, callback: () => {
-                    let b = bullets.create(player.x, player.y - 20, 'bullet');
-                    if (b) b.setVelocityY(-400);
-                }, loop: true
-            });
+function create() {
+    this.cameras.main.setBackgroundColor('#4ea1d3');
+    
+    player = this.physics.add.sprite(config.width/2, config.height-100, 'sun').setCollideWorldBounds(true);
+    bullets = this.physics.add.group();
+    clouds = this.physics.add.group();
+    bonuses = this.physics.add.group();
 
-            this.time.addEvent({
-                delay: 1000, callback: () => {
-                    let x = Phaser.Math.Between(40, config.width - 40);
-                    let c = clouds.create(x, -50, 'cloud');
-                    if (c) c.setVelocityY(150);
-                }, loop: true
-            });
+    scoreText = this.add.text(20, 40, 'Очки: 0', { fontSize: '20px', fill: '#fff', fontFamily: 'Arial' });
+    levelText = this.add.text(20, 70, 'Уровень: 1', { fontSize: '18px', fill: '#ffff00', fontFamily: 'Arial' });
 
-            this.physics.add.overlap(bullets, clouds, (b, c) => { b.destroy(); c.destroy(); score += 10; scoreText.setText('Score: ' + score); });
-            this.physics.add.overlap(player, clouds, () => { if(tg.HapticFeedback) tg.HapticFeedback.impactOccurred('heavy'); location.reload(); });
+    // Стрельба
+    this.time.addEvent({
+        delay: 300,
+        callback: fireBullet,
+        callbackScope: this,
+        loop: true
+    });
 
-            this.input.on('pointermove', (p) => { if (p.isDown) { player.x = p.x; player.y = p.y - 60; } });
-        }
+    // Спавн врагов
+    this.time.addEvent({
+        delay: 1000,
+        callback: spawnEnemy,
+        callbackScope: this,
+        loop: true
+    });
 
-        function update() {
-            bullets.children.iterate(b => { if (b && b.y < -20) b.destroy(); });
-            clouds.children.iterate(c => { if (c && c.y > config.height + 50) c.destroy(); });
-        }
+    // Коллизии
+    this.physics.add.overlap(bullets, clouds, hitEnemy, null, this);
+    this.physics.add.overlap(player, clouds, (p, c) => { resetGame.call(this); }, null, this);
+    this.physics.add.overlap(player, bonuses, getBonus, null, this);
+
+    // Управление
+    this.input.on('pointermove', (p) => {
+        if (p.isDown) { player.x = p.x; player.y = p.y - 60; }
+    });
+}
+
+function fireBullet() {
+    if (weaponLevel === 1) {
+        let b = bullets.create(player.x, player.y - 20, 'bullet');
+        if (b) b.setVelocityY(-500);
+    } else {
+        // Тройной выстрел
+        [-150, 0, 150].forEach(vx => {
+            let b = bullets.create(player.x, player.y - 20, 'bullet');
+            if (b) { b.setVelocityY(-500); b.setVelocityX(vx); }
+        });
     }
+}
+
+function spawnEnemy() {
+    if (isBossAlive) return;
+    let x = Phaser.Math.Between(40, config.width - 40);
+    let type = (score > 300) ? 'cloud2' : 'cloud1';
+    let c = clouds.create(x, -50, type);
+    c.hp = (type === 'cloud2') ? 2 : 1;
+    c.setVelocityY(200 + (score/10));
+
+    if (score > 300 && level === 1) { level = 2; levelText.setText('Уровень: 2 (Стратосфера)'); }
+    if (score > 600 && !isBossAlive) spawnBoss.call(this);
+}
+
+function hitEnemy(bullet, enemy) {
+    bullet.destroy();
+    enemy.hp--;
+    if (enemy.hp <= 0) {
+        if (Phaser.Math.Between(1, 10) > 8) { // 20% шанс бонуса
+            let b = bonuses.create(enemy.x, enemy.y, 'bonus');
+            b.setVelocityY(100);
+        }
+        enemy.destroy();
+        score += 10;
+        scoreText.setText('Очки: ' + score);
+    }
+}
+
+function getBonus(player, bonus) {
+    bonus.destroy();
+    weaponLevel = 2;
+    tg.HapticFeedback.impactOccurred('medium');
+    this.time.delayedCall(5000, () => { weaponLevel = 1; }); // Бонус на 5 сек
+}
+
+function spawnBoss() {
+    isBossAlive = true;
+    levelText.setText('БОСС: ЦИКЛОН');
+    boss = this.physics.add.sprite(config.width/2, -100, 'boss1');
+    boss.hp = 30;
+    this.tweens.add({ targets: boss, y: 150, duration: 2000, ease: 'Back.easeOut' });
+    
+    this.physics.add.overlap(bullets, boss, (bObj, bullet) => {
+        bullet.destroy();
+        bObj.hp--;
+        bObj.setTint(0xff0000);
+        this.time.delayedCall(100, () => bObj.clearTint());
+        if (bObj.hp <= 0) {
+            bObj.destroy();
+            isBossAlive = false;
+            score += 500;
+            levelText.setText('ПОБЕДА! Идем выше...');
+        }
+    });
+}
+
+function resetGame() {
+    tg.HapticFeedback.notificationOccurred('error');
+    score = 0; level = 1; weaponLevel = 1; isBossAlive = false;
+    this.scene.restart();
+}
+
+function update() {
+    bullets.children.iterate(b => { if (b && b.y < -20) b.destroy(); });
+}
+
     </script>
 </body>
 </html>
