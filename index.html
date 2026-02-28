@@ -159,6 +159,8 @@ function updateLivesDisplay() {
 }
 
 function resetGame() {
+    // Отправляем очки боту перед перезагрузкой
+    if (score > 0) { tg.sendData(score.toString()); }
     score = 0; lives = 3; level = 1; weaponLevel = 1; isBossActive = false; bossSpawned = false;
     updateLivesDisplay(); scoreText.setText('Очки: 0'); levelText.setText('Уровень: 1');
     this.scene.restart();
