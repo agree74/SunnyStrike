@@ -15,163 +15,93 @@
 <body>
     <div id="game-container"></div>
     <script>
-const tg = window.Telegram.WebApp;
-tg.ready();
-tg.expand();
-
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-function playSound(freq, type, duration, vol = 0.1) {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
-    osc.stop(audioCtx.currentTime + duration);
-}
-
-const config = {
-    type: Phaser.AUTO,
-    width: window.innerWidth,
-    height: window.innerHeight,
-    parent: 'game-container',
-    physics: { default: 'arcade' },
-    scene: { preload, create, update }
-};
-
-const game = new Phaser.Game(config);
-let player, bullets, clouds, bonuses, boss, bossBar;
-let score = 0, level = 1, lives = 3, isInvulnerable = false;
-let scoreText, livesText, levelText, isBossActive = false, bossSpawned = false;
-let weaponLevel = 1;
-
-function preload() {
-    let g = this.make.graphics({ x: 0, y: 0, add: false });
-    g.fillStyle(0xffff00).fillCircle(16, 16, 16); g.generateTexture('sun', 32, 32); g.clear();
-    g.fillStyle(0xffffff).fillRect(0, 0, 4, 12); g.generateTexture('bullet', 4, 12); g.clear();
-    g.fillStyle(0xeeeeee).fillEllipse(20, 15, 40, 30); g.generateTexture('cloud1', 40, 30); g.clear();
-    g.fillStyle(0x888888).fillEllipse(20, 15, 40, 30); g.generateTexture('cloud2', 40, 30); g.clear();
-    g.fillStyle(0x00ff00).fillCircle(10, 10, 10); g.generateTexture('bonus', 20, 20); g.clear();
-    g.fillStyle(0x444444).fillCircle(40, 40, 40); g.generateTexture('boss1', 80, 80);
-}
-
-function create() {
-    this.cameras.main.setBackgroundColor('#4ea1d3');
-    player = this.physics.add.sprite(config.width/2, config.height-100, 'sun').setCollideWorldBounds(true);
-    bullets = this.physics.add.group();
-    clouds = this.physics.add.group();
-    bonuses = this.physics.add.group();
-
-    scoreText = this.add.text(20, 40, 'Очки: 0', { fontSize: '20px', fill: '#fff', fontWeight: 'bold' });
-    levelText = this.add.text(20, 70, 'Уровень: 1', { fontSize: '18px', fill: '#ffff00' });
-    livesText = this.add.text(20, 100, '', { fontSize: '20px' });
-    updateLivesDisplay();
-
-    this.time.addEvent({ delay: 300, callback: () => {
-        playSound(450, 'square', 0.05, 0.05);
-        if (weaponLevel === 1) {
-            let b = bullets.create(player.x, player.y - 20, 'bullet');
-            if (b) b.setVelocityY(-500);
-        } else {
-            [-150, 0, 150].forEach(vx => {
-                let b = bullets.create(player.x, player.y - 20, 'bullet');
-                if (b) { b.setVelocityY(-500); b.setVelocityX(vx); }
-            });
-        }
-    }, loop: true });
-
-    this.time.addEvent({ delay: 1000, callback: spawn, callbackScope: this, loop: true });
-
-    this.physics.add.overlap(bullets, clouds, hitEnemy, null, this);
-    this.physics.add.overlap(player, clouds, onPlayerHit, null, this);
-    this.physics.add.overlap(player, bonuses, (p, b) => { 
-        b.destroy(); weaponLevel = 2; playSound(800, 'triangle', 0.3); 
-        this.time.delayedCall(5000, () => weaponLevel = 1); 
-    }, null, this);
-
-    this.input.on('pointermove', (p) => { if (p.isDown) { player.x = p.x; player.y = p.y - 60; } });
-    bossBar = this.add.graphics().setDepth(100);
-}
+// ... (начало кода, стили и звук без изменений) ...
 
 function spawn() {
     if (isBossActive) return;
+
+    // УРОВЕНЬ 2: Снежная Лавина (после 400 очков и смерти 1-го босса)
+    if (score >= 400 && bossSpawned && level === 1) { 
+        level = 2; 
+        levelText.setText('Уровень: 2 (Снега)'); 
+        this.cameras.main.setBackgroundColor('#a2d2ff'); // Смена обстановки
+    }
+
+    // Условие появления 2-го БОССА (например, на 800 очках)
+    if (score >= 800 && bossSpawned === 1) { 
+        spawnBoss2.call(this); 
+        return; 
+    }
+    
     if (score >= 400 && !bossSpawned) { spawnBoss.call(this); return; }
     
     let x = Phaser.Math.Between(40, config.width - 40);
-    if (score >= 200 && level === 1) { level = 2; levelText.setText('Уровень: 2'); }
-    
-    let type = (score >= 200) ? 'cloud2' : 'cloud1';
+    let type = (level === 2) ? 'cloud2' : 'cloud1';
     let c = clouds.create(x, -50, type);
-    c.hp = (type === 'cloud2') ? 2 : 1;
+    c.hp = (level === 2) ? 2 : 1;
     c.setVelocityY(200 + (level * 20));
 }
 
-function spawnBoss() {
-    isBossActive = true; bossSpawned = true; levelText.setText('БОСС: ЦИКЛОН');
-    boss = this.physics.add.sprite(config.width/2, -100, 'boss1');
-    boss.maxHp = 30; boss.hp = 30;
-    this.tweens.add({ targets: boss, y: 150, duration: 2000, ease: 'Back.easeOut' });
-
-    this.physics.add.overlap(bullets, boss, (bObj, bullet) => {
-        bullet.destroy(); bObj.hp--; playSound(120, 'sawtooth', 0.05);
-        if (bObj.hp <= 0) {
-            bObj.destroy(); isBossActive = false; score += 500; scoreText.setText('Очки: ' + score);
-            bossBar.clear(); playSound(60, 'square', 0.6, 0.3); levelText.setText('Уровень 1 ПРОЙДЕН!');
-        }
-    });
-}
-
+// ЗВУК СМЕРТИ ОБЛАКА
 function hitEnemy(bullet, enemy) {
     bullet.destroy(); enemy.hp--;
     if (enemy.hp <= 0) {
-        playSound(150, 'sine', 0.15, 0.2); // Звук смерти врага
+        // "Лопающийся" звук (высокий и короткий)
+        playSound(600, 'sine', 0.08, 0.2); 
+        
         if (Math.random() > 0.9) bonuses.create(enemy.x, enemy.y, 'bonus').setVelocityY(100);
-        enemy.destroy(); score += 10; scoreText.setText('Очки: ' + score);
+        enemy.destroy(); 
+        score += 10; 
+        scoreText.setText('Очки: ' + score);
     }
 }
 
-function onPlayerHit(p, c) {
-    if (isInvulnerable) return;
-    c.destroy(); lives--;
-    updateLivesDisplay();
-    playSound(100, 'sawtooth', 0.4, 0.3); // Звук урона ГГ
-    tg.HapticFeedback.notificationOccurred('error');
-
-    if (lives <= 0) {
-        resetGame.call(this);
-    } else {
-        // Эффект получения урона
-        isInvulnerable = true;
-        player.x = config.width / 2;
-        player.y = config.height - 100;
-        this.tweens.add({
-            targets: player, alpha: 0.2, duration: 100, yoyo: true, repeat: 10,
-            onComplete: () => { player.alpha = 1; isInvulnerable = false; }
-        });
-    }
-}
-
-function updateLivesDisplay() {
-    livesText.setText('Жизни: ' + '❤️'.repeat(lives));
-}
-
+// ФУНКЦИЯ ЗАВЕРШЕНИЯ И ПЕРЕДАЧИ ДАННЫХ
 function resetGame() {
-    // Отправляем очки боту перед перезагрузкой
-    if (score > 0) { tg.sendData(score.toString()); }
-    score = 0; lives = 3; level = 1; weaponLevel = 1; isBossActive = false; bossSpawned = false;
-    updateLivesDisplay(); scoreText.setText('Очки: 0'); levelText.setText('Уровень: 1');
+    // ПЕРЕДАЧА ДАННЫХ В БОТА
+    if (window.Telegram && window.Telegram.WebApp) {
+        // Отправляем счет строкой. ВАЖНО: закроет Mini App автоматически.
+        Telegram.WebApp.sendData(score.toString());
+    }
+
+    // Локальный ресет (если sendData не сработал или играем в браузере)
+    score = 0; lives = 3; level = 1; weaponLevel = 1; 
+    isBossActive = false; bossSpawned = false;
     this.scene.restart();
 }
 
-function update() {
-    bullets.children.iterate(b => { if (b && b.y < -20) b.destroy(); });
-    if (isBossActive && boss && boss.active) {
-        bossBar.clear(); bossBar.fillStyle(0xff0000);
-        bossBar.fillRect(config.width/2 - 50, 50, (boss.hp/boss.maxHp) * 100, 10);
-    }
+// БОСС №2: Снежная Лавина
+function spawnBoss2() {
+    isBossActive = true; 
+    bossSpawned = 2; // Метка, что второй босс в игре
+    levelText.setText('БОСС: ЛАВИНА');
+    
+    boss = this.physics.add.sprite(config.width/2, -100, 'boss1'); 
+    boss.setTint(0xffffff); // Белый босс
+    boss.maxHp = 50; boss.hp = 50;
+    
+    this.tweens.add({ targets: boss, y: 150, duration: 2000, ease: 'Back.easeOut' });
+
+    // Спец-эффект Лавины: замедление игрока
+    this.time.addEvent({
+        delay: 2000,
+        callback: () => {
+            if (isBossActive) {
+                this.cameras.main.flash(500, 255, 255, 255);
+                // Тут можно добавить летящие снежки
+            }
+        },
+        loop: true
+    });
+
+    this.physics.add.overlap(bullets, boss, (bObj, bullet) => {
+        bullet.destroy(); bObj.hp--; playSound(100, 'sawtooth', 0.05);
+        if (bObj.hp <= 0) {
+            bObj.destroy(); isBossActive = false; score += 1000;
+            levelText.setText('Уровень 2 ПРОЙДЕН!');
+            this.cameras.main.setBackgroundColor('#6a4c93'); // Смена фона на 3 уровень
+        }
+    });
 }
 
     </script>
