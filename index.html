@@ -15,95 +15,93 @@
 <body>
     <div id="game-container"></div>
     <script>
-// ... (начало кода, стили и звук без изменений) ...
 
+    // ... (в функции preload добавь текстуру для Босса 3) ...
+g.fillStyle(0xffa500).fillTriangle(0, 50, 100, 50, 50, 0); // Оранжевый треугольник-птица
+g.generateTexture('boss3', 100, 50); g.clear();
+
+// ... (в функции spawn обнови логику уровней) ...
 function spawn() {
     if (isBossActive) return;
 
-    // УРОВЕНЬ 2: Снежная Лавина (после 400 очков и смерти 1-го босса)
-    if (score >= 400 && bossSpawned && level === 1) { 
-        level = 2; 
-        levelText.setText('Уровень: 2 (Снега)'); 
-        this.cameras.main.setBackgroundColor('#a2d2ff'); // Смена обстановки
+    // УРОВЕНЬ 3: Стратосфера (Закат) - после 1200 очков
+    if (score >= 1200 && bossSpawned === 2) {
+        level = 3;
+        levelText.setText('Уровень: 3 (Закат)');
+        this.cameras.main.setBackgroundColor('#6a4c93'); // Фиолетовое небо
     }
 
-    // Условие появления 2-го БОССА (например, на 800 очках)
-    if (score >= 800 && bossSpawned === 1) { 
-        spawnBoss2.call(this); 
-        return; 
+    // Появление Босса №3 на 1600 очках
+    if (score >= 1600 && bossSpawned === 2) {
+        spawnBoss3.call(this);
+        return;
     }
-    
-    if (score >= 400 && !bossSpawned) { spawnBoss.call(this); return; }
-    
+
+    // Обычный спавн
     let x = Phaser.Math.Between(40, config.width - 40);
-    let type = (level === 2) ? 'cloud2' : 'cloud1';
+    let type = (level === 3) ? 'cloud2' : (level === 2 ? 'cloud2' : 'cloud1');
     let c = clouds.create(x, -50, type);
-    c.hp = (level === 2) ? 2 : 1;
-    c.setVelocityY(200 + (level * 20));
+    c.hp = (level >= 2) ? 2 : 1;
+    c.setVelocityY(250 + (level * 30)); // Ускоряем врагов
 }
 
-// ЗВУК СМЕРТИ ОБЛАКА
-function hitEnemy(bullet, enemy) {
-    bullet.destroy(); enemy.hp--;
-    if (enemy.hp <= 0) {
-        // "Лопающийся" звук (высокий и короткий)
-        playSound(600, 'sine', 0.08, 0.2); 
+// ЭФФЕКТ ВЕТРА НА УРОВНЕ 3
+function update() {
+    bullets.children.iterate(b => { 
+        if (b && b.y < -20) b.destroy();
+        // На 3 уровне ветер сносит пули вправо
+        if (level === 3 && b) b.x += 1.5; 
+    });
+
+    if (isBossActive && boss && boss.active) {
+        bossBar.clear(); bossBar.fillStyle(0xff0000);
+        bossBar.fillRect(config.width/2 - 50, 50, (boss.hp/boss.maxHp) * 100, 10);
         
-        if (Math.random() > 0.9) bonuses.create(enemy.x, enemy.y, 'bonus').setVelocityY(100);
-        enemy.destroy(); 
-        score += 10; 
-        scoreText.setText('Очки: ' + score);
+        // Поведение Босса 3: мечется по горизонтали
+        if (bossSpawned === 3) {
+            boss.x = (config.width / 2) + Math.sin(this.time.now / 300) * 100;
+        }
     }
 }
 
-// ФУНКЦИЯ ЗАВЕРШЕНИЯ И ПЕРЕДАЧИ ДАННЫХ
-function resetGame() {
-    // ПЕРЕДАЧА ДАННЫХ В БОТА
-    if (window.Telegram && window.Telegram.WebApp) {
-        // Отправляем счет строкой. ВАЖНО: закроет Mini App автоматически.
-        Telegram.WebApp.sendData(score.toString());
-    }
-
-    // Локальный ресет (если sendData не сработал или играем в браузере)
-    score = 0; lives = 3; level = 1; weaponLevel = 1; 
-    isBossActive = false; bossSpawned = false;
-    this.scene.restart();
-}
-
-// БОСС №2: Снежная Лавина
-function spawnBoss2() {
-    isBossActive = true; 
-    bossSpawned = 2; // Метка, что второй босс в игре
-    levelText.setText('БОСС: ЛАВИНА');
+// БОСС №3: Король Стриж
+function spawnBoss3() {
+    isBossActive = true;
+    bossSpawned = 3;
+    levelText.setText('БОСС: КОРОЛЬ СТРИЖ');
     
-    boss = this.physics.add.sprite(config.width/2, -100, 'boss1'); 
-    boss.setTint(0xffffff); // Белый босс
-    boss.maxHp = 50; boss.hp = 50;
+    boss = this.physics.add.sprite(config.width / 2, -100, 'boss3');
+    boss.maxHp = 70; boss.hp = 70;
     
-    this.tweens.add({ targets: boss, y: 150, duration: 2000, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: boss, y: 150, duration: 1500, ease: 'Cubic.easeOut' });
 
-    // Спец-эффект Лавины: замедление игрока
+    // Механика Стрижа: он хлопает крыльями (звук и толчок игрока)
     this.time.addEvent({
-        delay: 2000,
+        delay: 3000,
         callback: () => {
-            if (isBossActive) {
-                this.cameras.main.flash(500, 255, 255, 255);
-                // Тут можно добавить летящие снежки
+            if (isBossActive && boss.active) {
+                playSound(50, 'sawtooth', 0.5, 0.3); // Гул ветра
+                this.cameras.main.shake(200, 0.01);
+                // Порыв ветра сносит игрока к краю
+                this.tweens.add({ targets: player, x: player.x > config.width/2 ? 50 : config.width-50, duration: 1000 });
             }
         },
         loop: true
     });
 
     this.physics.add.overlap(bullets, boss, (bObj, bullet) => {
-        bullet.destroy(); bObj.hp--; playSound(100, 'sawtooth', 0.05);
+        bullet.destroy(); bObj.hp--; 
+        playSound(200, 'square', 0.05);
         if (bObj.hp <= 0) {
-            bObj.destroy(); isBossActive = false; score += 1000;
-            levelText.setText('Уровень 2 ПРОЙДЕН!');
-            this.cameras.main.setBackgroundColor('#6a4c93'); // Смена фона на 3 уровень
+            bObj.destroy(); isBossActive = false; score += 2000;
+            levelText.setText('Уровень 3 ПРОЙДЕН! Выходим в космос...');
+            this.cameras.main.setBackgroundColor('#1a1a2e'); // Темнеет перед 4 уровнем
         }
     });
 }
 
+    
+    
     </script>
 </body>
 </html>
