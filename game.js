@@ -1,3 +1,7 @@
+console.log("Game.js загружен!");
+alert("Игра запускается!"); // Если это окно всплывет — значит файл найден
+
+
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
