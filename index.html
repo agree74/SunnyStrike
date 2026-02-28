@@ -15,18 +15,17 @@
 <body>
     <div id="game-container"></div>
     <script>
- const tg = window.Telegram.WebApp;
+const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
 
-// Настройка аудио-контекста для эффектов без файлов
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-function playSound(freq, type, duration) {
+function playSound(freq, type, duration, vol = 0.1) {
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = type;
     osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
     osc.connect(gain);
     gain.connect(audioCtx.destination);
     osc.start();
@@ -44,10 +43,9 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
-
 let player, bullets, clouds, bonuses, boss, bossBar;
-let score = 0, level = 1, lives = 3;
-let scoreText, livesText, isBossActive = false, bossSpawned = false;
+let score = 0, level = 1, lives = 3, isInvulnerable = false;
+let scoreText, livesText, levelText, isBossActive = false, bossSpawned = false;
 let weaponLevel = 1;
 
 function preload() {
@@ -67,35 +65,35 @@ function create() {
     clouds = this.physics.add.group();
     bonuses = this.physics.add.group();
 
-    scoreText = this.add.text(20, 40, 'Очки: 0', { fontSize: '20px', fill: '#fff' });
-    livesText = this.add.text(20, 70, 'Жизни: ❤️❤️❤️', { fontSize: '20px', fill: '#ff0000' });
+    scoreText = this.add.text(20, 40, 'Очки: 0', { fontSize: '20px', fill: '#fff', fontWeight: 'bold' });
+    levelText = this.add.text(20, 70, 'Уровень: 1', { fontSize: '18px', fill: '#ffff00' });
+    livesText = this.add.text(20, 100, '', { fontSize: '20px' });
+    updateLivesDisplay();
 
-    // Стрельба
-    this.time.addEvent({ delay: 300, callback: fire, callbackScope: this, loop: true });
-    // Спавн врагов
+    this.time.addEvent({ delay: 300, callback: () => {
+        playSound(450, 'square', 0.05, 0.05);
+        if (weaponLevel === 1) {
+            let b = bullets.create(player.x, player.y - 20, 'bullet');
+            if (b) b.setVelocityY(-500);
+        } else {
+            [-150, 0, 150].forEach(vx => {
+                let b = bullets.create(player.x, player.y - 20, 'bullet');
+                if (b) { b.setVelocityY(-500); b.setVelocityX(vx); }
+            });
+        }
+    }, loop: true });
+
     this.time.addEvent({ delay: 1000, callback: spawn, callbackScope: this, loop: true });
 
     this.physics.add.overlap(bullets, clouds, hitEnemy, null, this);
-    this.physics.add.overlap(player, clouds, hitPlayer, null, this);
-    this.physics.add.overlap(player, bonuses, (p, b) => { b.destroy(); weaponLevel = 2; playSound(800, 'triangle', 0.2); this.time.delayedCall(5000, () => weaponLevel = 1); }, null, this);
+    this.physics.add.overlap(player, clouds, onPlayerHit, null, this);
+    this.physics.add.overlap(player, bonuses, (p, b) => { 
+        b.destroy(); weaponLevel = 2; playSound(800, 'triangle', 0.3); 
+        this.time.delayedCall(5000, () => weaponLevel = 1); 
+    }, null, this);
 
     this.input.on('pointermove', (p) => { if (p.isDown) { player.x = p.x; player.y = p.y - 60; } });
-
-    // Полоска здоровья босса (скрыта)
     bossBar = this.add.graphics().setDepth(100);
-}
-
-function fire() {
-    playSound(400, 'square', 0.05);
-    if (weaponLevel === 1) {
-        let b = bullets.create(player.x, player.y - 20, 'bullet');
-        if (b) b.setVelocityY(-500);
-    } else {
-        [-150, 0, 150].forEach(vx => {
-            let b = bullets.create(player.x, player.y - 20, 'bullet');
-            if (b) { b.setVelocityY(-500); b.setVelocityX(vx); }
-        });
-    }
 }
 
 function spawn() {
@@ -103,23 +101,25 @@ function spawn() {
     if (score >= 400 && !bossSpawned) { spawnBoss.call(this); return; }
     
     let x = Phaser.Math.Between(40, config.width - 40);
+    if (score >= 200 && level === 1) { level = 2; levelText.setText('Уровень: 2'); }
+    
     let type = (score >= 200) ? 'cloud2' : 'cloud1';
     let c = clouds.create(x, -50, type);
     c.hp = (type === 'cloud2') ? 2 : 1;
-    c.setVelocityY(200);
+    c.setVelocityY(200 + (level * 20));
 }
 
 function spawnBoss() {
-    isBossActive = true; bossSpawned = true;
+    isBossActive = true; bossSpawned = true; levelText.setText('БОСС: ЦИКЛОН');
     boss = this.physics.add.sprite(config.width/2, -100, 'boss1');
     boss.maxHp = 30; boss.hp = 30;
     this.tweens.add({ targets: boss, y: 150, duration: 2000, ease: 'Back.easeOut' });
 
     this.physics.add.overlap(bullets, boss, (bObj, bullet) => {
-        bullet.destroy(); bObj.hp--; playSound(150, 'sawtooth', 0.05);
+        bullet.destroy(); bObj.hp--; playSound(120, 'sawtooth', 0.05);
         if (bObj.hp <= 0) {
-            bObj.destroy(); isBossActive = false; score += 500;
-            bossBar.clear(); playSound(100, 'boom', 0.5);
+            bObj.destroy(); isBossActive = false; score += 500; scoreText.setText('Очки: ' + score);
+            bossBar.clear(); playSound(60, 'square', 0.6, 0.3); levelText.setText('Уровень 1 ПРОЙДЕН!');
         }
     });
 }
@@ -127,37 +127,50 @@ function spawnBoss() {
 function hitEnemy(bullet, enemy) {
     bullet.destroy(); enemy.hp--;
     if (enemy.hp <= 0) {
+        playSound(150, 'sine', 0.15, 0.2); // Звук смерти врага
         if (Math.random() > 0.9) bonuses.create(enemy.x, enemy.y, 'bonus').setVelocityY(100);
         enemy.destroy(); score += 10; scoreText.setText('Очки: ' + score);
-        playSound(200, 'sine', 0.1);
     }
 }
 
-function hitPlayer(p, c) {
+function onPlayerHit(p, c) {
+    if (isInvulnerable) return;
     c.destroy(); lives--;
-    updateLivesText();
-    tg.HapticFeedback.notificationOccurred('warning');
-    if (lives <= 0) resetGame.call(this);
+    updateLivesDisplay();
+    playSound(100, 'sawtooth', 0.4, 0.3); // Звук урона ГГ
+    tg.HapticFeedback.notificationOccurred('error');
+
+    if (lives <= 0) {
+        resetGame.call(this);
+    } else {
+        // Эффект получения урона
+        isInvulnerable = true;
+        player.x = config.width / 2;
+        player.y = config.height - 100;
+        this.tweens.add({
+            targets: player, alpha: 0.2, duration: 100, yoyo: true, repeat: 10,
+            onComplete: () => { player.alpha = 1; isInvulnerable = false; }
+        });
+    }
 }
 
-function updateLivesText() {
+function updateLivesDisplay() {
     livesText.setText('Жизни: ' + '❤️'.repeat(lives));
 }
 
 function resetGame() {
-    score = 0; lives = 3; weaponLevel = 1; isBossActive = false; bossSpawned = false;
-    updateLivesText(); scoreText.setText('Очки: 0'); this.scene.restart();
+    score = 0; lives = 3; level = 1; weaponLevel = 1; isBossActive = false; bossSpawned = false;
+    updateLivesDisplay(); scoreText.setText('Очки: 0'); levelText.setText('Уровень: 1');
+    this.scene.restart();
 }
 
 function update() {
     bullets.children.iterate(b => { if (b && b.y < -20) b.destroy(); });
     if (isBossActive && boss && boss.active) {
-        bossBar.clear();
-        bossBar.fillStyle(0xff0000);
+        bossBar.clear(); bossBar.fillStyle(0xff0000);
         bossBar.fillRect(config.width/2 - 50, 50, (boss.hp/boss.maxHp) * 100, 10);
     }
 }
-
 
     </script>
 </body>
