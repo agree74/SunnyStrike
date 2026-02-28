@@ -93,13 +93,16 @@ function startLevelTimer() {
 }
 
 function prepareBoss() {
-    clouds.clear(true, true);
+    // clouds.clear(true, true); <-- Эту строку удалили, теперь тучки не исчезают
     isBossActive = true;
-    timerText.setText("BOSS!");
+    timerText.setText("БОСС!");
+    
+    // Даем небольшую паузу (1 сек), чтобы игрок увидел надпись, прежде чем босс вылетит
     this.time.delayedCall(1000, () => {
         spawnBoss(this, 'boss' + level, 20 + (level * 20));
     });
 }
+
 
 function spawnBoss(scene, key, hp) {
     boss = scene.physics.add.sprite(config.width/2, -100, key);
