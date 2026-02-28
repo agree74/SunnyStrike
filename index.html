@@ -47,19 +47,15 @@
     let score = 0, level = 1, lives = 3, isInvulnerable = false;
     let scoreText, levelText, livesText;
     let isBossActive = false, bossSpawned = 0, weaponLevel = 1;
+    let gameState = "level1"; 
 
     function preload() {
         let g = this.make.graphics({ x: 0, y: 0, add: false });
-        // Солнце
         g.fillStyle(0xffff00).fillCircle(16, 16, 16); g.generateTexture('sun', 32, 32); g.clear();
-        // Пуля
         g.fillStyle(0xffffff).fillRect(0, 0, 4, 12); g.generateTexture('bullet', 4, 12); g.clear();
-        // Враги
         g.fillStyle(0xeeeeee).fillEllipse(20, 15, 40, 30); g.generateTexture('cloud1', 40, 30); g.clear();
         g.fillStyle(0x888888).fillEllipse(20, 15, 40, 30); g.generateTexture('cloud2', 40, 30); g.clear();
-        // Бонус
         g.fillStyle(0x00ff00).fillCircle(10, 10, 10); g.generateTexture('bonus', 20, 20); g.clear();
-        // Боссы
         g.fillStyle(0x444444).fillCircle(40, 40, 40); g.generateTexture('boss1', 80, 80); g.clear();
         g.fillStyle(0xffffff).fillCircle(40, 40, 40); g.generateTexture('boss2', 80, 80); g.clear();
         g.fillStyle(0xffa500).fillTriangle(0, 50, 100, 50, 50, 0); g.generateTexture('boss3', 100, 50);
@@ -106,14 +102,12 @@
     function spawn() {
         if (isBossActive) return;
 
-        // Логика переключения уровней
-        if (score >= 200 && level === 1) { level = 2; levelText.setText('Уровень: 2 (Снега)'); this.cameras.main.setBackgroundColor('#a2d2ff'); }
-        if (score >= 1200 && level === 2) { level = 3; levelText.setText('Уровень: 3 (Закат)'); this.cameras.main.setBackgroundColor('#6a4c93'); }
-
-        // Спавн боссов
-        if (score >= 400 && bossSpawned === 0) { spawnBoss1.call(this); return; }
-        if (score >= 800 && bossSpawned === 1) { spawnBoss2.call(this); return; }
-        if (score >= 1600 && bossSpawned === 2) { spawnBoss3.call(this); return; }
+        // ЛОГИКА ПОСЛЕДОВАТЕЛЬНОСТИ
+        if (gameState === "level1" && score >= 200) { spawnBoss1.call(this); gameState = "boss1"; return; }
+        if (gameState === "level1_done" && score >= 400) { level = 2; levelText.setText('Уровень: 2'); this.cameras.main.setBackgroundColor('#a2d2ff'); gameState = "level2"; }
+        if (gameState === "level2" && score >= 800) { spawnBoss2.call(this); gameState = "boss2"; return; }
+        if (gameState === "level2_done" && score >= 1200) { level = 3; levelText.setText('Уровень: 3'); this.cameras.main.setBackgroundColor('#6a4c93'); gameState = "level3"; }
+        if (gameState === "level3" && score >= 1600) { spawnBoss3.call(this); gameState = "boss3"; return; }
 
         let x = Phaser.Math.Between(40, config.width - 40);
         let type = (level >= 2) ? 'cloud2' : 'cloud1';
@@ -122,35 +116,22 @@
         c.setVelocityY(200 + (level * 20));
     }
 
-    function spawnBoss1() {
-        isBossActive = true; bossSpawned = 1; levelText.setText('БОСС: ЦИКЛОН');
-        boss = this.physics.add.sprite(config.width/2, -100, 'boss1');
-        initBoss(boss, 30, this);
-    }
-
-    function spawnBoss2() {
-        isBossActive = true; bossSpawned = 2; levelText.setText('БОСС: ЛАВИНА');
-        boss = this.physics.add.sprite(config.width/2, -100, 'boss2');
-        initBoss(boss, 50, this);
-    }
-
-    function spawnBoss3() {
-        isBossActive = true; bossSpawned = 3; levelText.setText('БОСС: СТРИЖ');
-        boss = this.physics.add.sprite(config.width/2, -100, 'boss3');
-        initBoss(boss, 70, this);
-    }
-
-    function initBoss(b, hp, scene) {
+    function initBoss(b, hp, scene, nextState) {
         b.maxHp = hp; b.hp = hp;
         scene.tweens.add({ targets: b, y: 150, duration: 2000, ease: 'Back.easeOut' });
         scene.physics.add.overlap(bullets, b, (bObj, bullet) => {
             bullet.destroy(); bObj.hp--; playSound(120, 'sawtooth', 0.05);
             if (bObj.hp <= 0) {
-                bObj.destroy(); isBossActive = false; score += 500;
+                bObj.destroy(); isBossActive = false; score += 300; scoreText.setText('Очки: ' + score);
                 bossBar.clear(); playSound(60, 'square', 0.5, 0.2);
+                gameState = nextState;
             }
         });
     }
+
+    function spawnBoss1() { isBossActive = true; boss = this.physics.add.sprite(config.width/2, -100, 'boss1'); initBoss(boss, 30, this, "level1_done"); }
+    function spawnBoss2() { isBossActive = true; boss = this.physics.add.sprite(config.width/2, -100, 'boss2'); initBoss(boss, 50, this, "level2_done"); }
+    function spawnBoss3() { isBossActive = true; boss = this.physics.add.sprite(config.width/2, -100, 'boss3'); initBoss(boss, 70, this, "level3_done"); }
 
     function hitEnemy(bullet, enemy) {
         bullet.destroy(); enemy.hp--;
@@ -167,8 +148,13 @@
         livesText.setText('Жизни: ' + '❤️'.repeat(lives));
         playSound(100, 'sawtooth', 0.4, 0.3);
         tg.HapticFeedback.notificationOccurred('error');
+
         if (lives <= 0) {
-            if (window.Telegram && window.Telegram.WebApp) Telegram.WebApp.sendData(score.toString());
+            // ОТПРАВКА ДАННЫХ В ТЕЛЕГРАМ
+            if (window.Telegram && window.Telegram.WebApp) {
+                tg.sendData(score.toString());
+            }
+            alert("Игра окончена! Твой счет: " + score);
             location.reload(); 
         } else {
             isInvulnerable = true; player.x = config.width/2; player.y = config.height-100;
@@ -179,12 +165,11 @@
     function update() {
         bullets.children.iterate(b => { 
             if (b && b.y < -20) b.destroy(); 
-            if (level === 3 && b) b.x += 1.2; // Ветер на 3 уровне
+            if (level === 3 && b) b.x += 1.2;
         });
         if (isBossActive && boss && boss.active) {
             bossBar.clear(); bossBar.fillStyle(0xff0000);
             bossBar.fillRect(config.width/2 - 50, 50, (boss.hp/boss.maxHp) * 100, 10);
-            if (bossSpawned === 3) boss.x = (config.width/2) + Math.sin(this.time.now/300) * 80;
         }
     }
     </script>
