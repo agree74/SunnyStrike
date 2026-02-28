@@ -1,13 +1,20 @@
-console.log("Game.js загружен!");
-alert("Игра запускается!"); // Если это окно всплывет — значит файл найден
-
-
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
 
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+// Исправляем блокировку звука: контекст создаем, но стартуем после клика
+let audioCtx;
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+}
+
 function playSound(freq, type, duration, vol = 0.1) {
+    if (!audioCtx || audioCtx.state === 'suspended') return;
     try {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -38,23 +45,42 @@ let isBossActive = false, bossSpawned = 0, weaponLevel = 1, gameState = "level1"
 
 function preload() {
     let g = this.make.graphics({ x: 0, y: 0, add: false });
-    g.fillStyle(0xffff00).fillCircle(16, 16, 16); g.generateTexture('sun', 32, 32); g.clear();
-    g.fillStyle(0xffffff).fillRect(0, 0, 4, 12); g.generateTexture('bullet', 4, 12); g.clear();
+    
+    // Солнце
+    g.fillStyle(0xffff00).fillCircle(16, 16, 16); 
+    g.generateTexture('sun', 32, 32); g.clear();
+    
+    // Пуля
+    g.fillStyle(0xffffff).fillRect(0, 0, 4, 12); 
+    g.generateTexture('bullet', 4, 12); g.clear();
+    
+    // Враги
     g.fillStyle(0xeeeeee).fillEllipse(20, 15, 40, 30); g.generateTexture('cloud1', 40, 30); g.clear();
     g.fillStyle(0x888888).fillEllipse(20, 15, 40, 30); g.generateTexture('cloud2', 40, 30); g.clear();
-    g.fillStyle(0x00ff00).fillCircle(10, 10, 10); g.generateTexture('bonus', 20, 20); g.clear();
-    // Боссы
+    
+    // Бонус
+    g.fillStyle(0x00ff00).fillCircle(10, 10, 10); 
+    g.generateTexture('bonus', 20, 20); g.clear();
+    
+    // БОССЫ (Рисуем простыми формами, чтобы не было ошибок)
     g.fillStyle(0x444444).fillCircle(40, 40, 40); g.generateTexture('boss1', 80, 80); g.clear();
     g.fillStyle(0xffffff).fillCircle(40, 40, 40); g.generateTexture('boss2', 80, 80); g.clear();
     g.fillStyle(0xffa500).fillTriangle(0, 50, 100, 50, 50, 0); g.generateTexture('boss3', 100, 50); g.clear();
-    // Босс 4 (Ледяная Комета)
-    g.fillStyle(0x00ffff).fillStar(40, 40, 5, 40, 20); g.generateTexture('boss4', 80, 80); g.clear();
-    // Босс 5 (Спутник-Мусор)
-    g.fillStyle(0xaaaaaa).fillRect(0, 0, 80, 40); g.fillStyle(0x555555).fillRect(20, -10, 40, 60); g.generateTexture('boss5', 80, 80);
+    
+    // Босс 4 (Ледяная Комета) - Заменили fillStar на два ромба (эффект звезды)
+    g.fillStyle(0x00ffff);
+    g.fillRect(30, 0, 20, 80); g.fillRect(0, 30, 80, 20);
+    g.generateTexture('boss4', 80, 80); g.clear();
+    
+    // Босс 5 (Спутник)
+    g.fillStyle(0xaaaaaa).fillRect(0, 20, 80, 40); 
+    g.fillStyle(0x555555).fillRect(30, 0, 20, 80); 
+    g.generateTexture('boss5', 80, 80);
 }
 
 function create() {
     this.cameras.main.setBackgroundColor('#4ea1d3');
+    
     player = this.physics.add.sprite(config.width/2, config.height-100, 'sun').setCollideWorldBounds(true);
     bullets = this.physics.add.group();
     clouds = this.physics.add.group();
@@ -63,6 +89,9 @@ function create() {
     scoreText = this.add.text(20, 40, 'Очки: 0', { fontSize: '20px', fill: '#fff', fontWeight: 'bold' });
     levelText = this.add.text(20, 70, 'Уровень: 1', { fontSize: '18px', fill: '#ffff00' });
     livesText = this.add.text(20, 100, 'Жизни: ❤️❤️❤️', { fontSize: '20px' });
+
+    // Инициализация звука по первому клику
+    this.input.once('pointerdown', () => { initAudio(); });
 
     this.time.addEvent({ delay: 300, callback: fire, callbackScope: this, loop: true });
     this.time.addEvent({ delay: 1000, callback: spawn, callbackScope: this, loop: true });
@@ -81,7 +110,6 @@ function create() {
 function spawn() {
     if (isBossActive || gameState === "ending") return;
 
-    // ЛОГИКА УРОВНЕЙ
     if (gameState === "level1" && score >= 200) { spawnBoss(this, 'boss1', 30, "level1_done"); return; }
     if (gameState === "level1_done" && score >= 400) { level = 2; levelText.setText('Уровень: 2'); this.cameras.main.setBackgroundColor('#a2d2ff'); gameState = "level2"; }
     if (gameState === "level2" && score >= 800) { spawnBoss(this, 'boss2', 50, "level2_done"); return; }
@@ -93,7 +121,7 @@ function spawn() {
     if (gameState === "level5" && score >= 4000) { spawnBoss(this, 'boss5', 120, "game_win"); return; }
 
     let x = Phaser.Math.Between(40, config.width - 40);
-    let type = (level >= 4) ? 'cloud2' : (level >= 2 ? 'cloud2' : 'cloud1');
+    let type = (level >= 2) ? 'cloud2' : 'cloud1';
     let c = clouds.create(x, -50, type);
     c.hp = (level >= 4) ? 3 : (level >= 2 ? 2 : 1);
     c.setVelocityY(200 + (level * 25));
@@ -125,17 +153,14 @@ function startEnding(scene) {
         targets: player, x: config.width / 2, y: config.height / 2,
         scale: 2, duration: 2000, ease: 'Power2',
         onComplete: () => {
-            // Анимация отдаления камеры
             scene.cameras.main.zoomTo(0.1, 5000);
             scene.time.delayedCall(5000, () => {
-                // Появление Злодея (Черная дыра)
-                let villain = scene.add.text(config.width/2, config.height/2 + 200, "😈", { fontSize: '300px' }).setOrigin(0.5);
+                let villain = scene.add.text(config.width/2, config.height/2 + 200, "😈", { fontSize: '100px' }).setOrigin(0.5);
                 villain.setAlpha(0);
                 scene.tweens.add({ targets: villain, alpha: 1, duration: 2000 });
-                scene.add.text(config.width/2, config.height/2 + 500, "To be continued...", { fontSize: '150px', fill: '#f0f' }).setOrigin(0.5);
-                
+                scene.add.text(config.width/2, config.height/2 + 300, "To be continued...", { fontSize: '40px', fill: '#f0f' }).setOrigin(0.5);
                 scene.time.delayedCall(4000, () => {
-                    tg.sendData(score.toString());
+                    if (window.Telegram && window.Telegram.WebApp) tg.sendData(score.toString());
                 });
             });
         }
@@ -172,7 +197,7 @@ function onPlayerHit(p, c) {
     playSound(100, 'sawtooth', 0.4, 0.3);
     tg.HapticFeedback.notificationOccurred('error');
     if (lives <= 0) {
-        tg.sendData(score.toString());
+        if (window.Telegram && window.Telegram.WebApp) tg.sendData(score.toString());
         location.reload(); 
     } else {
         isInvulnerable = true; player.x = config.width/2; player.y = config.height-100;
