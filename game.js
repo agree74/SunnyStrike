@@ -1,4 +1,60 @@
-// ... (начало кода со звуками и конфигом без изменений) ...
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
+
+let audioCtx;
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playSound(freq, type, duration, vol = 0.1) {
+    if (!audioCtx || audioCtx.state === 'suspended') return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+        osc.stop(audioCtx.currentTime + duration);
+    } catch(e) {}
+}
+
+const config = {
+    type: Phaser.AUTO,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    parent: 'game-container',
+    physics: { default: 'arcade' },
+    scene: { preload, create, update }
+};
+
+const game = new Phaser.Game(config);
+
+let player, bullets, clouds, bonuses, boss, bossBar, bgClouds;
+let score = 0, level = 1, lives = 3, isInvulnerable = false;
+let scoreText, levelText, livesText, timerText;
+let isBossActive = false, weaponLevel = 1, bonusTimer = null;
+let levelTimer, levelTimeLeft = 20;
+
+function preload() {
+    let g = this.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0xffff00).fillCircle(16, 16, 16); g.generateTexture('sun', 32, 32); g.clear();
+    g.fillStyle(0xffffff).fillRect(0, 0, 4, 12); g.generateTexture('bullet', 4, 12); g.clear();
+    g.fillStyle(0xeeeeee).fillEllipse(20, 15, 40, 30); g.generateTexture('cloud1', 40, 30); g.clear();
+    g.fillStyle(0x888888).fillEllipse(20, 15, 40, 30); g.generateTexture('cloud2', 40, 30); g.clear();
+    g.fillStyle(0x00ff00).fillCircle(10, 10, 10); g.generateTexture('bonus', 20, 20); g.clear();
+    // Текстуры боссов
+    g.fillStyle(0x444444).fillCircle(40, 40, 40); g.generateTexture('boss1', 80, 80); g.clear();
+    g.fillStyle(0xffffff).fillCircle(40, 40, 40); g.generateTexture('boss2', 80, 80); g.clear();
+    g.fillStyle(0xffa500).fillTriangle(0, 50, 100, 50, 50, 0); g.generateTexture('boss3', 100, 50); g.clear();
+    g.fillStyle(0x00ffff).fillRect(30, 0, 20, 80); g.fillRect(0, 30, 80, 20); g.generateTexture('boss4', 80, 80); g.clear();
+    g.fillStyle(0xaaaaaa).fillRect(0, 20, 80, 40).fillStyle(0x555555).fillRect(30, 0, 20, 80); g.generateTexture('boss5', 80, 80);
+}
+
 
 function create() {
     this.cameras.main.setBackgroundColor('#4ea1d3');
