@@ -1,5 +1,6 @@
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
+console.log("Sunny Strike: Скрипт загружен");
 
 let audioCtx;
 function initAudio() {
@@ -9,23 +10,34 @@ function initAudio() {
 
 function playSound(f, t, d, v = 0.1) {
     if (!audioCtx || audioCtx.state === 'suspended') return;
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
-    g.gain.setValueAtTime(v, audioCtx.currentTime);
-    o.connect(g); g.connect(audioCtx.destination);
-    o.start(); g.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + d); o.stop(audioCtx.currentTime + d);
+    try {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+        g.gain.setValueAtTime(v, audioCtx.currentTime);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(); g.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + d); o.stop(audioCtx.currentTime + d);
+    } catch(e) {}
 }
 
-// Ноты прописаны явно, чтобы избежать ошибок циклов
+// Звуки прописаны жестко по числам, чтобы избежать ошибок синтаксиса
 function playBossWin() {
-    [523, 659, 783].forEach((f, i) => setTimeout(() => playSound(f, 'triangle', 0.3, 0.1), i * 100));
+    setTimeout(() => playSound(523, 'triangle', 0.3, 0.1), 0);
+    setTimeout(() => playSound(659, 'triangle', 0.3, 0.1), 150);
+    setTimeout(() => playSound(783, 'triangle', 0.3, 0.1), 300);
 }
+
 function playFinalVictory() {
-    [523, 659, 783, 1046].forEach((f, i) => setTimeout(() => playSound(f, 'square', 0.5, 0.1), i * 200));
+    setTimeout(() => playSound(523, 'square', 0.5, 0.1), 0);
+    setTimeout(() => playSound(659, 'square', 0.5, 0.1), 200);
+    setTimeout(() => playSound(783, 'square', 0.5, 0.1), 400);
+    setTimeout(() => playSound(1046, 'square', 0.6, 0.1), 600);
 }
+
 function playEvilMelody() {
-    [80, 70, 60].forEach((f, i) => setTimeout(() => playSound(f, 'sawtooth', 1.2, 0.3), i * 600));
+    setTimeout(() => playSound(80, 'sawtooth', 1.0, 0.2), 0);
+    setTimeout(() => playSound(70, 'sawtooth', 1.2, 0.2), 600);
+    setTimeout(() => playSound(60, 'sawtooth', 1.5, 0.2), 1200);
 }
 
 const config = {
@@ -49,11 +61,12 @@ function preload() {
     g.fillStyle(0x888888).fillEllipse(20, 15, 40, 30); g.generateTexture('cloud2', 40, 30); g.clear();
     g.fillStyle(0x00ff00).fillCircle(10, 10, 10); g.generateTexture('bonus', 20, 20); g.clear();
     for(let i=1; i<=5; i++) { g.fillStyle(0x444444).fillCircle(40, 40, 40); g.generateTexture('boss'+i, 80, 80); g.clear(); }
-    const pCols = [0xff4500, 0x1e90ff, 0x32cd32, 0xffd700];
-    for(let i=0; i<4; i++) { g.fillStyle(pCols[i]).fillCircle(10, 10, 10); g.generateTexture('p'+i, 20, 20); g.clear(); }
+    g.fillStyle(0xff4500).fillCircle(10, 10, 10); g.generateTexture('p0', 20, 20); g.clear();
+    g.fillStyle(0x1e90ff).fillCircle(10, 10, 10); g.generateTexture('p1', 20, 20); g.clear();
+    g.fillStyle(0x32cd32).fillCircle(10, 10, 10); g.generateTexture('p2', 20, 20); g.clear();
+    g.fillStyle(0xffd700).fillCircle(10, 10, 10); g.generateTexture('p3', 20, 20); g.clear();
     g.fillStyle(0xffffff).fillCircle(5, 5, 5); g.generateTexture('dot', 10, 10); g.clear();
-    // Дыра с яркой обводкой (чтобы была видна на черном)
-    g.fillStyle(0x000000).fillCircle(100, 100, 90); g.lineStyle(10, 0x8a2be2).strokeCircle(100, 100, 95); g.generateTexture('blackhole', 200, 200);
+    g.fillStyle(0x000000).fillCircle(100, 100, 95); g.lineStyle(8, 0x8a2be2).strokeCircle(100, 100, 100); g.generateTexture('blackhole', 200, 200);
 }
 
 function create() {
@@ -103,43 +116,33 @@ function prepareBoss() {
                 bObj.destroy(); isBossActive = false; score += 1000; scoreText.setText('Очки: '+score); bossBar.clear();
                 if(lives<5) lives++; livesText.setText('❤️'.repeat(lives));
                 if (level < 5) { playBossWin(); level++; levelText.setText('Уровень: '+level); this.cameras.main.setBackgroundColor(['#4ea1d3','#a2d2ff','#6a4c93','#1a1a2e','#0b0b0b'][level-1]); startLevelTimer.call(this); }
-                else { if(tg.sendData) tg.sendData(score.toString()); startEnding(this); }
+                else { if (tg.sendData) tg.sendData(score.toString()); startEnding(this); }
             }
         });
     });
 }
 
 function startEnding(scene) {
-    gameState = "ending"; timerText.destroy(); scoreText.destroy(); levelText.destroy(); livesText.destroy();
+    gameState = "ending"; timerText.setText(""); scoreText.destroy(); levelText.destroy(); livesText.destroy();
     bgClouds.clear(true, true); clouds.clear(true, true); playFinalVictory();
 
-    // 1. Солнце в центр
     scene.tweens.add({
         targets: player, x: config.width/2, y: config.height/2, scale: 2.5, duration: 2000,
         onComplete: () => {
-            // 2. Создаем планеты по одной
             for(let i=0; i<4; i++) {
                 let p = scene.add.sprite(config.width/2, config.height/2, 'p'+i);
                 planetsGroup.add(p);
                 scene.tweens.add({ targets: p, x: config.width/2 + Math.cos(i)*80, y: config.height/2 + Math.sin(i)*80, duration: 1500 });
             }
-
-            // 3. Схлопывание
-            scene.time.delayedCall(3500, () => {
+            scene.time.delayedCall(3000, () => {
                 scene.cameras.main.setBackgroundColor('#000000');
-                player.setScale(0); // Вместо твина просто убираем
-                planetsGroup.clear(true, true);
-                
+                player.setAlpha(0); planetsGroup.clear(true, true);
                 let dot = scene.add.sprite(config.width/2, config.height/2, 'dot').setScale(0.5);
-
-                // 4. Звездный тоннель (звезды летят к центру)
-                for(let i=0; i<120; i++) {
-                    let a = Math.random() * Phaser.Math.PI2; let d = 600;
+                for(let i=0; i<100; i++) {
+                    let a = Math.random() * 6.28; let d = 600;
                     let s = scene.add.sprite(config.width/2 + Math.cos(a)*d, config.height/2 + Math.sin(a)*d, 'dot').setScale(Math.random());
                     scene.tweens.add({ targets: s, x: config.width/2, y: config.height/2, alpha: 0, duration: 1000 + Math.random()*1500 });
                 }
-
-                // 5. Появление Галактики
                 scene.time.delayedCall(2500, () => {
                     dot.destroy();
                     galaxyStars.clear().lineStyle(1, 0xffffff, 0.4).setAlpha(0);
@@ -148,18 +151,14 @@ function startEnding(scene) {
                         galaxyStars.strokeCircle(config.width/2 + Math.cos(a)*r, config.height/2 + Math.sin(a)*r, 0.5);
                     }
                     scene.tweens.add({ targets: galaxyStars, alpha: 1, scale: 3.5, duration: 4000 });
-
-                    // 6. Появление ГИГАНТСКОЙ Черной Дыры СБОКУ
                     scene.time.delayedCall(6000, () => {
                         playEvilMelody();
                         let bh = scene.add.sprite(config.width + 500, config.height/2, 'blackhole').setScale(4).setScrollFactor(0).setDepth(200);
                         let eyes = scene.add.text(config.width + 500, config.height/2 - 20, "👁️  👁️", { fontSize: '60px' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
-                        
                         scene.tweens.add({ targets: [bh, eyes], x: config.width - 200, duration: 4000, ease: 'Power2' });
-                        
                         scene.time.delayedCall(5000, () => {
                             scene.add.text(config.width/2, config.height/2 + 150, "ПРОДОЛЖЕНИЕ СЛЕДУЕТ...", { fontSize: '28px', fill: '#f0f', fontWeight: 'bold' }).setOrigin(0.5).setScrollFactor(0);
-                            scene.time.delayedCall(5000, () => tg.close());
+                            scene.time.delayedCall(5000, () => { tg.close(); });
                         });
                     });
                 });
