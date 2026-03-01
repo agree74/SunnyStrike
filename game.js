@@ -102,83 +102,105 @@ const game = new Phaser.Game(config);
 function preload() {
     const g = this.make.graphics({ x: 0, y: 0, add: false });
     
-    // === СОЛНЫШКО - ДОБРОЕ И КРАСИВОЕ ===
+    // === СОЛНЫШКО - НОВОЕ (ИЗ SVG) ===
+    const sunColor = 0xFFD700;
+    const faceColor = 0x442200;
+    
     // Обычное (добрая улыбка)
-    g.fillStyle(0xffdd00).fillCircle(16, 16, 14);
-    g.fillStyle(0xffaa00).fillCircle(16, 16, 10);
-    // Лучи
-    for(let i=0; i<12; i++) {
-        const angle = (i / 12) * Math.PI * 2;
-        g.fillStyle(0xffdd00);
-        g.fillCircle(16 + Math.cos(angle) * 22, 16 + Math.sin(angle) * 22, 3);
+    // Лучи (10 треугольников)
+    for (let i = 0; i < 10; i++) {
+        const angle = Phaser.Math.DegToRad(i * 36);
+        const p1 = new Phaser.Math.Vector2(0, -22).rotate(angle);
+        const p2 = new Phaser.Math.Vector2(-6, -8).rotate(angle);
+        const p3 = new Phaser.Math.Vector2(6, -8).rotate(angle);
+        g.fillStyle(sunColor);
+        g.fillTriangle(20 + p1.x, 20 + p1.y, 20 + p2.x, 20 + p2.y, 20 + p3.x, 20 + p3.y);
     }
-    // Лицо (доброе)
-    g.fillStyle(0x000000).fillCircle(12, 12, 3);
-    g.fillStyle(0x000000).fillCircle(20, 12, 3);
-    g.lineStyle(2, 0x000000);
+    // Основной круг
+    g.fillStyle(sunColor);
+    g.fillCircle(20, 20, 12);
+    // Глазки
+    g.fillStyle(faceColor);
+    g.fillCircle(16, 18, 1.5);
+    g.fillCircle(24, 18, 1.5);
+    // Улыбка
+    g.lineStyle(2, faceColor);
     g.beginPath();
-    g.arc(16, 18, 6, 0.1 * Math.PI, 0.9 * Math.PI);
+    g.arc(20, 22, 5, Phaser.Math.DegToRad(20), Phaser.Math.DegToRad(160), false);
     g.strokePath();
-    g.generateTexture('sun_normal', 32, 32);
+    g.generateTexture('sun_normal', 40, 40);
     g.clear();
     
     // Сосредоточенное (стрельба)
-    g.fillStyle(0xffdd00).fillCircle(16, 16, 14);
-    g.fillStyle(0xffaa00).fillCircle(16, 16, 10);
-    for(let i=0; i<12; i++) {
-        const angle = (i / 12) * Math.PI * 2;
-        g.fillStyle(0xffdd00);
-        g.fillCircle(16 + Math.cos(angle) * 22, 16 + Math.sin(angle) * 22, 3);
+    for (let i = 0; i < 10; i++) {
+        const angle = Phaser.Math.DegToRad(i * 36);
+        const p1 = new Phaser.Math.Vector2(0, -22).rotate(angle);
+        const p2 = new Phaser.Math.Vector2(-6, -8).rotate(angle);
+        const p3 = new Phaser.Math.Vector2(6, -8).rotate(angle);
+        g.fillStyle(sunColor);
+        g.fillTriangle(20 + p1.x, 20 + p1.y, 20 + p2.x, 20 + p2.y, 20 + p3.x, 20 + p3.y);
     }
-    g.fillStyle(0x000000).fillCircle(12, 12, 3);
-    g.fillStyle(0x000000).fillCircle(20, 12, 3);
-    g.lineStyle(2, 0x000000);
+    g.fillStyle(sunColor);
+    g.fillCircle(20, 20, 12);
+    g.fillStyle(faceColor);
+    g.fillCircle(16, 18, 1.5);
+    g.fillCircle(24, 18, 1.5);
+    // Сосредоточенный рот
+    g.lineStyle(2, faceColor);
     g.beginPath();
-    g.moveTo(12, 20);
-    g.lineTo(16, 17);
-    g.lineTo(20, 20);
+    g.moveTo(16, 25);
+    g.lineTo(20, 23);
+    g.lineTo(24, 25);
     g.strokePath();
-    g.generateTexture('sun_focused', 32, 32);
+    g.generateTexture('sun_focused', 40, 40);
     g.clear();
     
     // Раненое (грустное)
-    g.fillStyle(0xffcc00).fillCircle(16, 16, 14);
-    g.fillStyle(0xff9900).fillCircle(16, 16, 10);
-    for(let i=0; i<8; i++) {
-        const angle = (i / 8) * Math.PI * 2;
-        g.fillStyle(0xffcc00);
-        g.fillCircle(16 + Math.cos(angle) * 20, 16 + Math.sin(angle) * 20, 2);
+    for (let i = 0; i < 8; i++) {
+        const angle = Phaser.Math.DegToRad(i * 45);
+        const p1 = new Phaser.Math.Vector2(0, -20).rotate(angle);
+        const p2 = new Phaser.Math.Vector2(-5, -8).rotate(angle);
+        const p3 = new Phaser.Math.Vector2(5, -8).rotate(angle);
+        g.fillStyle(0xFFCC00);
+        g.fillTriangle(20 + p1.x, 20 + p1.y, 20 + p2.x, 20 + p2.y, 20 + p3.x, 20 + p3.y);
     }
-    g.lineStyle(2, 0x000000);
+    g.fillStyle(0xFFCC00);
+    g.fillCircle(20, 20, 12);
+    g.fillStyle(faceColor);
+    g.fillCircle(16, 19, 1.5);
+    g.fillCircle(24, 19, 1.5);
+    // Грустный рот
+    g.lineStyle(2, faceColor);
     g.beginPath();
-    g.moveTo(10, 14);
-    g.lineTo(14, 12);
-    g.moveTo(18, 12);
-    g.lineTo(22, 14);
+    g.arc(20, 26, 4, Phaser.Math.DegToRad(200), Phaser.Math.DegToRad(340), false);
     g.strokePath();
-    g.beginPath();
-    g.arc(16, 22, 4, 0.2 * Math.PI, 0.8 * Math.PI, false);
-    g.strokePath();
-    g.generateTexture('sun_hurt', 32, 32);
+    g.generateTexture('sun_hurt', 40, 40);
     g.clear();
     
     // Счастливое (победа)
-    g.fillStyle(0xffff00).fillCircle(16, 16, 14);
-    g.fillStyle(0xffaa00).fillCircle(16, 16, 10);
-    for(let i=0; i<16; i++) {
-        const angle = (i / 16) * Math.PI * 2;
-        g.fillStyle(0xffff00);
-        g.fillCircle(16 + Math.cos(angle) * 26, 16 + Math.sin(angle) * 26, 3);
+    for (let i = 0; i < 12; i++) {
+        const angle = Phaser.Math.DegToRad(i * 30);
+        const p1 = new Phaser.Math.Vector2(0, -24).rotate(angle);
+        const p2 = new Phaser.Math.Vector2(-6, -8).rotate(angle);
+        const p3 = new Phaser.Math.Vector2(6, -8).rotate(angle);
+        g.fillStyle(0xFFFF00);
+        g.fillTriangle(20 + p1.x, 20 + p1.y, 20 + p2.x, 20 + p2.y, 20 + p3.x, 20 + p3.y);
     }
-    g.fillStyle(0x000000).fillCircle(12, 12, 3);
-    g.fillStyle(0x000000).fillCircle(20, 12, 3);
-    g.fillStyle(0xffffff).fillCircle(13, 11, 1);
-    g.fillStyle(0xffffff).fillCircle(21, 11, 1);
-    g.lineStyle(2, 0x000000);
+    g.fillStyle(0xFFFF00);
+    g.fillCircle(20, 20, 12);
+    g.fillStyle(faceColor);
+    g.fillCircle(16, 18, 1.5);
+    g.fillCircle(24, 18, 1.5);
+    // Блестящие глаза
+    g.fillStyle(0xffffff);
+    g.fillCircle(17, 17, 0.8);
+    g.fillCircle(25, 17, 0.8);
+    // Широкая улыбка
+    g.lineStyle(2, faceColor);
     g.beginPath();
-    g.arc(16, 18, 8, 0.1 * Math.PI, 0.9 * Math.PI);
+    g.arc(20, 22, 6, Phaser.Math.DegToRad(20), Phaser.Math.DegToRad(160), false);
     g.strokePath();
-    g.generateTexture('sun_happy', 32, 32);
+    g.generateTexture('sun_happy', 40, 40);
     g.clear();
     
     // === ВРАГИ - ОБЛАКА (ЗЛЫЕ) ===
