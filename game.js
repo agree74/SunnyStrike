@@ -2,6 +2,10 @@ const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
 
+// === СОХРАНЕНИЕ ЛУЧШЕГО СЧЁТА ===
+let bestScore = parseInt(localStorage.getItem('bestScore') || '0');
+let leaderboard = JSON.parse(localStorage.getItem('leaderboard') || '[]');
+
 let audioCtx;
 function initAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -48,6 +52,7 @@ const game = new Phaser.Game(config);
 let player, bullets, clouds, bonuses, boss, bossBar, bgClouds, planetsGroup, galaxyStars;
 let score = 0, level = 1, lives = 3, isInvulnerable = false;
 let scoreText, levelText, livesText, timerText, isBossActive = false, weaponLevel = 1, gameState = "playing";
+let exitButton, bestScoreText;
 
 function preload() {
     let g = this.make.graphics({ x: 0, y: 0, add: false });
@@ -79,13 +84,19 @@ function create() {
     levelText = this.add.text(20, 70, 'Уровень: 1', { fontSize: '18px', fill: '#ffff00' });
     livesText = this.add.text(20, 100, '❤️❤️❤️', { fontSize: '20px' });
     timerText = this.add.text(config.width - 80, 40, '20s', { fontSize: '24px', fill: '#fff' });
-  /*
-    for(let i=1; i<=5; i++) {
-        this.add.text(config.width-40, 150+(i*40), 'B'+i, {background:'#333', padding:4}).setInteractive()
-        .on('pointerdown', () => { level=i; prepareBoss.call(this); });
-    }
-    this.add.text(config.width-40, 400, 'WIN', {background:'#f00', padding:4}).setInteractive().on('pointerdown', () => startEnding(this));
-    */
+    
+    // === ЛУЧШИЙ СЧЁТ ===
+    bestScoreText = this.add.text(config.width - 20, 70, '🏆: ' + bestScore, { fontSize: '16px', fill: '#ffd700', fontWeight: 'bold' }).setOrigin(1, 0);
+    
+    // === КНОПКА ВЫХОДА ===
+    exitButton = this.add.text(config.width - 10, config.height - 30, '🚪 Выйти', { 
+        fontSize: '18px', fill: '#fff', backgroundColor: '#ff4444', padding: { x: 10, y: 5 } 
+    }).setOrigin(1, 1).setInteractive().setDepth(100);
+    
+    exitButton.on('pointerdown', () => {
+        sendScoreAndClose();
+    });
+    
     this.input.once('pointerdown', () => { initAudio(); startLevelTimer.call(this); });
     this.spawnTimer = this.time.addEvent({ delay: 1000, callback: () => { if(!isBossActive && gameState === "playing") spawnEnemy.call(this); }, loop: true });
     this.time.addEvent({ delay: 300, callback: fire, callbackScope: this, loop: true });
@@ -116,7 +127,7 @@ function prepareBoss() {
                 bObj.destroy(); isBossActive = false; score += 1000; scoreText.setText('Очки: '+score); bossBar.clear();
                 if(lives<5) lives++; livesText.setText('❤️'.repeat(lives));
                 if (level < 5) { playBossWin(); level++; levelText.setText('Уровень: '+level); this.cameras.main.setBackgroundColor(['#4ea1d3','#a2d2ff','#6a4c93','#1a1a2e','#0b0b0b'][level-1]); startLevelTimer.call(this); }
-                else { if (tg.sendData) tg.sendData(score.toString()); startEnding(this); }
+                else { startEnding(this); }  // === ОТПРАВКА БУДЕТ В startEnding ===
             }
         });
     });
@@ -170,7 +181,10 @@ function startEnding(scene) {
                                         fontSize: '40px', fill: '#f0f', fontWeight: 'bold', stroke: '#000', strokeThickness: 4
                                     }).setOrigin(0.5).setScrollFactor(0).setDepth(102);
 
-                                    scene.time.delayedCall(5000, () => { tg.close(); });
+                                    // === ОТПРАВКА СЧЁТА И ЗАКРЫТИЕ (с паузой 1 сек после окончания анимации) ===
+                                    scene.time.delayedCall(6000, () => {
+                                        sendScoreAndClose();
+                                    });
                                 });
                             });
                         });
@@ -183,8 +197,13 @@ function startEnding(scene) {
 
 function fire() { if(gameState==="ending") return; playSound(450,'square',0.05,0.02); if(weaponLevel===1){ let b=bullets.create(player.x,player.y-20,'bullet'); if(b) b.setVelocityY(-600); } else { [-200,0,200].forEach(vx=>{ let b=bullets.create(player.x,player.y-20,'bullet'); if(b){ b.setVelocityY(-600); b.setVelocityX(vx); }}); } }
 function spawnEnemy() { let x=Phaser.Math.Between(40,config.width-40); let c=clouds.create(x,-50,level>=2?'cloud2':'cloud1'); c.hp=level>=3?2:1; c.setVelocityY(200+(level*25)); }
-function hitEnemy(bullet, enemy) { bullet.destroy(); enemy.hp--; if(enemy.hp<=0){ playSound(150, 'sine', 0.1, 0.2); if(Math.random()>0.9) bonuses.create(enemy.x, enemy.y, 'bonus').setVelocityY(100); enemy.destroy(); score+=10; scoreText.setText('Очки: '+score); } }
-function onPlayerHit(p, c) { if(isInvulnerable||gameState==="ending") return; if(c.destroy) c.destroy(); lives--; livesText.setText('❤️'.repeat(lives)); playSound(100,'sawtooth',0.4,0.3); tg.HapticFeedback.notificationOccurred('error'); if(lives<=0){ tg.sendData(score.toString()); location.reload(); } else { isInvulnerable=true; this.tweens.add({ targets: player, alpha: 0.2, duration: 100, yoyo: true, repeat: 10, onComplete: () => { player.alpha = 1; isInvulnerable = false; } }); } }
+function hitEnemy(bullet, enemy) { bullet.destroy(); enemy.hp--; if(enemy.hp<=0){ playSound(150, 'sine', 0.1, 0.2); if(Math.random()>0.9) bonuses.create(enemy.x, enemy.y, 'bonus').setVelocityY(100); enemy.destroy(); score+=10; scoreText.setText('Очки: '+score); 
+    // Обновляем лучший счёт
+    if(score > bestScore) { bestScore = score; bestScoreText.setText('🏆: ' + bestScore); }
+    // Лёгкая вибрация при попадании
+    if(tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+} }
+function onPlayerHit(p, c) { if(isInvulnerable||gameState==="ending") return; if(c.destroy) c.destroy(); lives--; livesText.setText('❤️'.repeat(lives)); playSound(100,'sawtooth',0.4,0.3); tg.HapticFeedback.notificationOccurred('error'); if(lives<=0){ sendScoreAndClose(); } else { isInvulnerable=true; this.tweens.add({ targets: player, alpha: 0.2, duration: 100, yoyo: true, repeat: 10, onComplete: () => { player.alpha = 1; isInvulnerable = false; } }); } }
 function update() {
     bgClouds.children.iterate(c => { if(c){ c.y+=0.8; if(c.y>config.height){ c.y=-100; c.x=Phaser.Math.Between(0,config.width); }} });
     bullets.children.iterate(b => { if(b && b.y<-20) b.destroy(); });
@@ -193,5 +212,24 @@ function update() {
         boss.x = (config.width/2) + Math.sin(this.time.now/500)*(60+level*15);
         boss.y = 150 + Math.cos(this.time.now/800)*(40+level*10);
     }
+}
+
+// === ФУНКЦИЯ ОТПРАВКИ СЧЁТА И ЗАКРЫТИЯ ===
+function sendScoreAndClose() {
+    // Сохраняем лучший счёт локально
+    if (score > bestScore) {
+        bestScore = score;
+        localStorage.setItem('bestScore', bestScore.toString());
+    }
+    
+    // Отправляем счёт в Telegram
+    if (tg.sendData) {
+        tg.sendData(score.toString());
+    }
+    
+    // Закрываем игру с небольшой задержкой
+    setTimeout(() => {
+        tg.close();
+    }, 1000);
 }
 
