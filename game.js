@@ -27,10 +27,18 @@ let exitButton;
 function initAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') audioCtx.resume();
+    console.log('initAudio вызван, состояние:', audioCtx.state);
 }
 
 function playSound(freq, type, duration, vol = 0.1) {
-    if (!audioCtx || audioCtx.state === 'suspended') return;
+    if (!audioCtx) {
+        console.log('Звук: audioCtx не создан!');
+        return;
+    }
+    if (audioCtx.state === 'suspended') {
+        console.log('Звук: audioCtx suspended, resume...');
+        audioCtx.resume();
+    }
     try {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -42,7 +50,10 @@ function playSound(freq, type, duration, vol = 0.1) {
         osc.start();
         gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
         osc.stop(audioCtx.currentTime + duration);
-    } catch(e) {}
+        console.log('Звук:', freq + 'Hz', type, duration + 'сек');
+    } catch(e) {
+        console.error('Ошибка звука:', e);
+    }
 }
 
 const SFX = {
@@ -484,6 +495,16 @@ function create() {
     
     exitButton.on('pointerdown', () => {
         sendScoreAndClose();
+    });
+    
+    // === ИНИЦИАЛИЗАЦИЯ АУДИО (при первом клике) ===
+    let audioInitialized = false;
+    this.input.once('pointerdown', () => {
+        if(!audioInitialized) {
+            initAudio();
+            audioInitialized = true;
+            console.log('Аудио инициализировано!');
+        }
     });
     
     // === УПРАВЛЕНИЕ ===
