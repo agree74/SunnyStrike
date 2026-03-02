@@ -99,369 +99,602 @@ const game = new Phaser.Game(config);
 // PRELOAD - ГРАФИКА (КРАСИВАЯ!)
 // ============================================================================
 
+
 function preload() {
     const g = this.make.graphics({ x: 0, y: 0, add: false });
     
-    // === СОЛНЫШКО - НОВОЕ (ИЗ SVG) ===
-    const sunColor = 0xFFD700;
-    const faceColor = 0x442200;
-    
-    // Обычное (добрая улыбка)
-    // Лучи (10 треугольников)
-    for (let i = 0; i < 10; i++) {
-        const angle = Phaser.Math.DegToRad(i * 36);
-        const p1 = new Phaser.Math.Vector2(0, -22).rotate(angle);
-        const p2 = new Phaser.Math.Vector2(-6, -8).rotate(angle);
-        const p3 = new Phaser.Math.Vector2(6, -8).rotate(angle);
-        g.fillStyle(sunColor);
-        g.fillTriangle(20 + p1.x, 20 + p1.y, 20 + p2.x, 20 + p2.y, 20 + p3.x, 20 + p3.y);
+    // === 1.1 СОЛНЫШКО Обычное - вариант 1 (80x80) ===
+    for(let i=0; i<12; i++) {
+        const angle = (i / 12) * Math.PI * 2;
+        g.fillStyle(0xffdd00);
+        g.fillCircle(40 + Math.cos(angle) * 28, 40 + Math.sin(angle) * 28, 5);
     }
-    // Основной круг
-    g.fillStyle(sunColor);
-    g.fillCircle(20, 20, 12);
-    // Глазки
-    g.fillStyle(faceColor);
-    g.fillCircle(16, 18, 1.5);
-    g.fillCircle(24, 18, 1.5);
-    // Улыбка
-    g.lineStyle(2, faceColor);
-    g.beginPath();
-    g.arc(20, 22, 5, Phaser.Math.DegToRad(20), Phaser.Math.DegToRad(160), false);
-    g.strokePath();
-    g.generateTexture('sun_normal', 40, 40);
-    g.clear();
-    
-    // Сосредоточенное (стрельба)
-    for (let i = 0; i < 10; i++) {
-        const angle = Phaser.Math.DegToRad(i * 36);
-        const p1 = new Phaser.Math.Vector2(0, -22).rotate(angle);
-        const p2 = new Phaser.Math.Vector2(-6, -8).rotate(angle);
-        const p3 = new Phaser.Math.Vector2(6, -8).rotate(angle);
-        g.fillStyle(sunColor);
-        g.fillTriangle(20 + p1.x, 20 + p1.y, 20 + p2.x, 20 + p2.y, 20 + p3.x, 20 + p3.y);
-    }
-    g.fillStyle(sunColor);
-    g.fillCircle(20, 20, 12);
-    g.fillStyle(faceColor);
-    g.fillCircle(16, 18, 1.5);
-    g.fillCircle(24, 18, 1.5);
-    // Сосредоточенный рот
-    g.lineStyle(2, faceColor);
-    g.beginPath();
-    g.moveTo(16, 25);
-    g.lineTo(20, 23);
-    g.lineTo(24, 25);
-    g.strokePath();
-    g.generateTexture('sun_focused', 40, 40);
-    g.clear();
-    
-    // Раненое (грустное)
-    for (let i = 0; i < 8; i++) {
-        const angle = Phaser.Math.DegToRad(i * 45);
-        const p1 = new Phaser.Math.Vector2(0, -20).rotate(angle);
-        const p2 = new Phaser.Math.Vector2(-5, -8).rotate(angle);
-        const p3 = new Phaser.Math.Vector2(5, -8).rotate(angle);
-        g.fillStyle(0xFFCC00);
-        g.fillTriangle(20 + p1.x, 20 + p1.y, 20 + p2.x, 20 + p2.y, 20 + p3.x, 20 + p3.y);
-    }
-    g.fillStyle(0xFFCC00);
-    g.fillCircle(20, 20, 12);
-    g.fillStyle(faceColor);
-    g.fillCircle(16, 19, 1.5);
-    g.fillCircle(24, 19, 1.5);
-    // Грустный рот
-    g.lineStyle(2, faceColor);
-    g.beginPath();
-    g.arc(20, 26, 4, Phaser.Math.DegToRad(200), Phaser.Math.DegToRad(340), false);
-    g.strokePath();
-    g.generateTexture('sun_hurt', 40, 40);
-    g.clear();
-    
-    // Счастливое (победа)
-    for (let i = 0; i < 12; i++) {
-        const angle = Phaser.Math.DegToRad(i * 30);
-        const p1 = new Phaser.Math.Vector2(0, -24).rotate(angle);
-        const p2 = new Phaser.Math.Vector2(-6, -8).rotate(angle);
-        const p3 = new Phaser.Math.Vector2(6, -8).rotate(angle);
-        g.fillStyle(0xFFFF00);
-        g.fillTriangle(20 + p1.x, 20 + p1.y, 20 + p2.x, 20 + p2.y, 20 + p3.x, 20 + p3.y);
-    }
-    g.fillStyle(0xFFFF00);
-    g.fillCircle(20, 20, 12);
-    g.fillStyle(faceColor);
-    g.fillCircle(16, 18, 1.5);
-    g.fillCircle(24, 18, 1.5);
-    // Блестящие глаза
-    g.fillStyle(0xffffff);
-    g.fillCircle(17, 17, 0.8);
-    g.fillCircle(25, 17, 0.8);
-    // Широкая улыбка
-    g.lineStyle(2, faceColor);
-    g.beginPath();
-    g.arc(20, 22, 6, Phaser.Math.DegToRad(20), Phaser.Math.DegToRad(160), false);
-    g.strokePath();
-    g.generateTexture('sun_happy', 40, 40);
-    g.clear();
-    
-    // === ВРАГИ - ОБЛАКА (ЗЛЫЕ) ===
-    // Облако 1 (1 HP) - белое, злое
-    g.fillStyle(0xffffff).fillEllipse(20, 15, 40, 30);
-    g.fillCircle(12, 18, 12);
-    g.fillCircle(28, 18, 12);
-    g.fillCircle(20, 12, 14);
-    // Злое лицо
+    g.fillStyle(0xffcc00);
+    g.fillCircle(40, 40, 24);
     g.fillStyle(0x000000);
-    g.fillCircle(14, 16, 3);
-    g.fillCircle(26, 16, 3);
+    g.fillCircle(33, 36, 3);
+    g.fillCircle(47, 36, 3);
     g.lineStyle(2, 0x000000);
     g.beginPath();
-    g.moveTo(10, 14);
-    g.lineTo(16, 16);
-    g.moveTo(24, 16);
-    g.lineTo(30, 14);
+    g.arc(40, 46, 10, 0.15 * Math.PI, 0.85 * Math.PI);
     g.strokePath();
-    g.beginPath();
-    g.arc(20, 22, 6, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
-    g.generateTexture('cloud1', 40, 35);
+    g.generateTexture('sun_normal', 80, 80);
     g.clear();
     
-    // Туча 2 (2 HP) - серая, с молниями
-    g.fillStyle(0x666677).fillEllipse(20, 15, 40, 30);
-    g.fillCircle(12, 18, 12);
-    g.fillCircle(28, 18, 12);
-    g.fillCircle(20, 12, 14);
-    // Злое лицо
+    // === 1.2 СОЛНЫШКО Раненое - вариант 2 (80x80) ===
+    for(let i=0; i<12; i++) {
+        const angle = (i / 12) * Math.PI * 2;
+        g.fillStyle(0xccaa00);
+        g.fillCircle(40 + Math.cos(angle) * 28, 40 + Math.sin(angle) * 28, 5);
+    }
+    g.fillStyle(0xffaa00);
+    g.fillCircle(40, 40, 24);
     g.fillStyle(0x000000);
-    g.fillCircle(14, 16, 3);
-    g.fillCircle(26, 16, 3);
-    // Брови злые
+    g.fillCircle(33, 36, 3);
+    g.fillCircle(47, 36, 3);
+    g.lineStyle(2, 0x000000);
+    g.beginPath();
+    g.moveTo(29, 32);
+    g.lineTo(37, 34);
+    g.moveTo(51, 32);
+    g.lineTo(43, 34);
+    g.strokePath();
+    g.beginPath();
+    g.moveTo(32, 52);
+    g.lineTo(40, 48);
+    g.lineTo(48, 52);
+    g.strokePath();
+    g.beginPath();
+    g.moveTo(28, 30);
+    g.lineTo(36, 32);
+    g.moveTo(52, 30);
+    g.lineTo(44, 32);
+    g.strokePath();
+    g.generateTexture('sun_hurt', 80, 80);
+    g.clear();
+    
+    // === 1.3 СОЛНЫШКО Счастливое - вариант 3 (120x120) ===
+    for(let i=0; i<12; i++) {
+        const angle = (i / 12) * Math.PI * 2;
+        g.fillStyle(0xffdd00);
+        g.fillCircle(60 + Math.cos(angle) * 50, 60 + Math.sin(angle) * 50, 9);
+    }
+    g.fillStyle(0xffcc00);
+    g.fillCircle(60, 60, 44);
+    g.fillStyle(0x000000);
+    g.fillCircle(47, 53, 6);
+    g.fillCircle(73, 53, 6);
+    g.fillStyle(0xffffff);
+    g.fillCircle(50, 50, 3);
+    g.fillCircle(76, 50, 3);
+    g.lineStyle(4, 0xcc3300);
+    g.beginPath();
+    g.arc(60, 75, 24, 0.1 * Math.PI, 0.9 * Math.PI);
+    g.strokePath();
+    g.generateTexture('sun_happy', 120, 120);
+    g.clear();
+    
+    // === 2.1 ОБЛАКО - вариант 2 (80x60) ===
+    g.fillStyle(0xf8f8f8);
+    g.fillCircle(40, 32, Math.max(32, 12) / 2);
+    g.fillStyle(0xf0f0f0);
+    g.fillCircle(20, 26, 10);
+    g.fillCircle(60, 26, 10);
+    g.fillCircle(40, 22, 12);
+    g.fillStyle(0x000000);
+    g.fillCircle(32, 34, 2);
+    g.fillCircle(48, 34, 2);
     g.lineStyle(3, 0x000000);
     g.beginPath();
-    g.moveTo(10, 12);
-    g.lineTo(18, 14);
-    g.moveTo(30, 12);
-    g.lineTo(22, 14);
+    g.arc(40, 40, 6, 0.2 * Math.PI, 0.8 * Math.PI, true);
     g.strokePath();
-    // Злой рот
-    g.beginPath();
-    g.arc(20, 24, 6, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
-    // Молнии
-    g.lineStyle(2, 0xffff00);
-    g.beginPath();
-    g.moveTo(15, 30);
-    g.lineTo(12, 36);
-    g.lineTo(15, 36);
-    g.lineTo(12, 42);
-    g.strokePath();
-    g.beginPath();
-    g.moveTo(25, 30);
-    g.lineTo(28, 36);
-    g.lineTo(25, 36);
-    g.lineTo(28, 42);
-    g.strokePath();
-    g.generateTexture('cloud2', 40, 45);
+    g.generateTexture('cloud1', 80, 60);
     g.clear();
     
-    // Перистое облако 3 (3 HP) - розоватое
-    g.fillStyle(0xffcccc).fillEllipse(25, 12, 50, 24);
-    g.fillCircle(10, 14, 10);
-    g.fillCircle(20, 10, 10);
-    g.fillCircle(30, 14, 10);
-    g.fillCircle(40, 12, 8);
-    // Злое лицо
-    g.fillStyle(0x000000);
-    g.fillCircle(15, 14, 3);
-    g.fillCircle(35, 14, 3);
-    g.lineStyle(2, 0x000000);
-    g.beginPath();
-    g.arc(25, 18, 8, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
-    g.generateTexture('cloud3', 50, 28);
-    g.clear();
-    
-    // Кристалл 4 (4 HP) - ледяной
-    g.fillStyle(0x00ffff).fillTriangle(20, 0, 0, 40, 40, 40);
-    g.lineStyle(1, 0xffffff, 0.5);
-    g.beginPath();
-    g.moveTo(20, 0);
-    g.lineTo(20, 40);
-    g.strokePath();
-    // Злое лицо
-    g.fillStyle(0x000000);
-    g.fillCircle(15, 25, 3);
-    g.fillCircle(25, 25, 3);
-    g.lineStyle(2, 0x000000);
-    g.beginPath();
-    g.arc(20, 32, 6, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
-    g.generateTexture('crystal', 40, 40);
-    g.clear();
-    
-    // Техно-мусор 5 (5 HP)
-    g.fillStyle(0x666666).fillRect(0, 0, 35, 35);
-    g.fillStyle(0x333333).fillRect(5, 5, 25, 25);
-    g.fillStyle(0xff0000).fillCircle(17, 17, 5);
-    // Злое лицо
-    g.fillStyle(0xff0000);
-    g.fillCircle(10, 12, 3);
-    g.fillCircle(25, 12, 3);
-    g.lineStyle(2, 0xff0000);
-    g.beginPath();
-    g.arc(17, 25, 8, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
-    g.generateTexture('debris', 35, 35);
-    g.clear();
-    
-    // === БОССЫ - ЗЛЫЕ ===
-    for(let i=1; i<=5; i++) {
-        g.clear();
-        const size = 70 + (i * 10);
-        const half = size / 2;
-        
-        if (i === 1) { // Босс уровня 1 - Грозовая туча
-            g.fillStyle(0x444455).fillCircle(half, half, half);
-            // Молнии вокруг
-            g.lineStyle(4, 0xffff00);
-            for(let j=0; j<8; j++) {
-                const angle = (j / 8) * Math.PI * 2;
-                g.beginPath();
-                g.moveTo(half + Math.cos(angle) * (half - 5), half + Math.sin(angle) * (half - 5));
-                g.lineTo(half + Math.cos(angle) * (half + 15), half + Math.sin(angle) * (half + 15));
-                g.strokePath();
-            }
-            // Злые красные глаза
-            g.fillStyle(0xff0000);
-            g.fillCircle(half - 15, half - 5, 10);
-            g.fillCircle(half + 15, half - 5, 10);
-            g.fillStyle(0x000000);
-            g.fillCircle(half - 15, half - 5, 4);
-            g.fillCircle(half + 15, half - 5, 4);
-            // Злые брови
-            g.lineStyle(4, 0x000000);
-            g.beginPath();
-            g.moveTo(half - 25, half - 15);
-            g.lineTo(half - 5, half - 10);
-            g.moveTo(half + 25, half - 15);
-            g.lineTo(half + 5, half - 10);
-            g.strokePath();
-            // Злой рот
-            g.lineStyle(4, 0xff0000);
-            g.beginPath();
-            g.arc(half, half + 20, 15, 0.2 * Math.PI, 0.8 * Math.PI, true);
-            g.strokePath();
-        } else if (i === 5) { // Финальный босс - Чёрная дыра
-            g.fillStyle(0x111111).fillCircle(half, half, half);
-            g.lineStyle(3, 0x333333);
-            g.strokeCircle(half, half, half);
-            // Фиолетовая аура
-            g.lineStyle(6, 0x880088, 0.5);
-            g.strokeCircle(half, half, half + 5);
-            // Огромные злые глаза
-            g.fillStyle(0xff00ff);
-            g.fillCircle(half - 20, half - 10, 18);
-            g.fillCircle(half + 20, half - 10, 18);
-            g.fillStyle(0x000000);
-            g.fillCircle(half - 20, half - 10, 8);
-            g.fillCircle(half + 20, half - 10, 8);
-            // Зловещая ухмылка
-            g.lineStyle(5, 0xff00ff);
-            g.beginPath();
-            g.arc(half, half + 20, 25, 0.1 * Math.PI, 0.9 * Math.PI, true);
-            g.strokePath();
-        } else {
-            g.fillStyle(0x555555 + (i * 0x111111)).fillCircle(half, half, half);
-            g.lineStyle(3, 0x888888);
-            g.strokeCircle(half, half, half);
-            // Злые глаза
-            g.fillStyle(0xff0000);
-            g.fillCircle(half - 15, half - 5, 8);
-            g.fillCircle(half + 15, half - 5, 8);
-            g.fillStyle(0x000000);
-            g.fillCircle(half - 15, half - 5, 3);
-            g.fillCircle(half + 15, half - 5, 3);
-            // Злые брови
-            g.lineStyle(3, 0x000000);
-            g.beginPath();
-            g.moveTo(half - 22, half - 12);
-            g.lineTo(half - 8, half - 8);
-            g.moveTo(half + 22, half - 12);
-            g.lineTo(half + 8, half - 8);
-            g.strokePath();
-            // Злой рот
-            g.lineStyle(3, 0xff0000);
-            g.beginPath();
-            g.arc(half, half + 15, 12, 0.2 * Math.PI, 0.8 * Math.PI, true);
-            g.strokePath();
-        }
-        
-        g.generateTexture('boss'+i, size, size);
+    // === 2.2 ГРОЗОВАЯ ТУЧА - вариант 2 (80x75) ===
+    g.fillStyle(0x4a4a5a);
+    g.fillCircle(40, 38, Math.max(32, 14) / 2);
+    g.fillStyle(0x4a4a5a);
+    g.fillCircle(20, 26, 12);
+    g.fillCircle(40, 22, 14);
+    g.fillCircle(60, 26, 12);
+    g.lineStyle(4, 0xffff00);
+    for(let i=0; i<3; i++) {
+        const mx = 16 + i * 24;
+        g.beginPath();
+        g.moveTo(mx, 44);
+        g.lineTo(mx - 6, 54);
+        g.lineTo(mx, 54);
+        g.lineTo(mx - 6, 64);
+        g.strokePath();
     }
-    
-    // === СНАРЯДЫ ===
+    g.fillStyle(0x000000);
+    g.fillCircle(32, 38, 2);
+    g.fillCircle(48, 38, 2);
+    g.lineStyle(4, 0x000000);
+    g.beginPath();
+    g.arc(40, 46, 7, 0.2 * Math.PI, 0.8 * Math.PI, true);
+    g.strokePath();
+    g.generateTexture('cloud2', 80, 75);
     g.clear();
-    g.fillStyle(0xffffff).fillRect(0, 0, 4, 12);
-    g.generateTexture('bullet', 4, 12);
     
+    // === 2.3 ПЕРИСТОЕ ОБЛАКО - вариант 1 (100x50) ===
+    g.fillStyle(0xffcccc);
+    g.fillCircle(50, 25, Math.max(42, 8) / 2);
+    g.fillStyle(0xffdddd);
+    g.fillCircle(25, 18, 10);
+    g.fillCircle(38, 15, 10);
+    g.fillCircle(50, 14, 11);
+    g.fillCircle(62, 15, 10);
+    g.fillCircle(75, 18, 10);
+    g.fillStyle(0x000000);
+    g.fillCircle(38, 28, 2);
+    g.fillCircle(62, 28, 2);
+    g.lineStyle(3, 0x000000);
+    g.beginPath();
+    g.arc(50, 34, 7, 0.2 * Math.PI, 0.8 * Math.PI, true);
+    g.strokePath();
+    g.generateTexture('cloud3', 100, 50);
     g.clear();
-    g.fillStyle(0x00ffff).fillCircle(6, 6, 6);
-    g.generateTexture('bullet_double', 12, 12);
     
-    // === БОНУСЫ (разные типы) ===
-    // Радужная капля (двойной выстрел) - ЗЕЛЁНЫЙ
+    // === 2.4 КРИСТАЛЛ - вариант 1 (70x70) ===
+    g.fillStyle(0x00ffff);
+    g.fillTriangle(35, 5, 55, 35, 35, 65);
+    g.fillTriangle(35, 5, 15, 35, 35, 65);
+    g.lineStyle(4, 'rgba(255,255,255,0.7)');
+    g.beginPath();
+    g.moveTo(35, 5);
+    g.lineTo(55, 35);
+    g.lineTo(35, 65);
+    g.lineTo(15, 35);
+    g.closePath();
+    g.strokePath();
+    g.lineStyle(3, 'rgba(255,255,255,0.7)');
+    g.beginPath();
+    g.moveTo(35, 10);
+    g.lineTo(35, 60);
+    g.moveTo(20, 35);
+    g.lineTo(50, 35);
+    g.strokePath();
+    g.fillStyle(0x003333);
+    g.fillCircle(28, 25, 2.5);
+    g.fillCircle(42, 25, 2.5);
+    g.lineStyle(4, 0x003333);
+    g.beginPath();
+    g.arc(35, 45, 6, 0.2 * Math.PI, 0.8 * Math.PI, true);
+    g.strokePath();
+    g.generateTexture('crystal', 70, 70);
     g.clear();
-    g.fillStyle(0x00ff00).fillCircle(10, 10, 10);
-    g.lineStyle(2, 0xffffff);
-    g.strokeCircle(10, 10, 10);
-    g.generateTexture('bonus_double', 20, 20);
     
-    // Солнечный зайчик (кол-во пуль x2) - ЖЁЛТЫЙ
-    g.clear();
-    g.fillStyle(0xffff00).fillCircle(10, 10, 10);
-    g.lineStyle(2, 0xffffff);
-    g.strokeCircle(10, 10, 10);
-    g.generateTexture('bonus_speed', 20, 20);
-    
-    // Линза (урон x2) - ФИОЛЕТОВЫЙ
-    g.clear();
-    g.fillStyle(0xff00ff).fillCircle(10, 10, 10);
-    g.lineStyle(2, 0xffffff);
-    g.strokeCircle(10, 10, 10);
-    g.generateTexture('bonus_damage', 20, 20);
-    
-    // Сердечко (+1 жизнь) - КРАСНЫЙ
-    g.clear();
+    // === 2.5 ТЕХНО-МУСОР - вариант 7 (70x70) ===
+    g.fillStyle(0x999999);
+    g.fillRect(17, 17, 36, 36);
+    g.lineStyle(8, 0x666666);
+    for(let i=0; i<6; i++) {
+        const angle = (i / 6) * Math.PI + Math.PI;
+        const startX = 35 + Math.cos(angle) * 20;
+        const startY = 35 + Math.sin(angle) * 20;
+        const endX = 35 + Math.cos(angle) * 35;
+        const endY = 35 + Math.sin(angle) * 35;
+        g.beginPath();
+        g.moveTo(startX, startY);
+        g.lineTo(endX, endY);
+        g.strokePath();
+    }
     g.fillStyle(0xff0000);
-    // Рисуем сердечко
-    g.fillCircle(7, 8, 5);
-    g.fillCircle(13, 8, 5);
-    g.fillTriangle(3, 8, 17, 8, 10, 17);
-    g.generateTexture('bonus_heart', 20, 20);
-    
-    // === ЧАСТИЦЫ ===
+    g.fillCircle(35, 32, 6);
+    g.fillStyle(0xffffff);
+    g.fillCircle(33, 30, 2);
+    g.fillStyle(0xff0000);
+    g.fillCircle(27, 25, 2);
+    g.fillCircle(43, 25, 2);
+    g.lineStyle(4, 0xff0000);
+    g.beginPath();
+    g.arc(35, 45, 6, 0.2 * Math.PI, 0.8 * Math.PI, true);
+    g.strokePath();
+    g.generateTexture('debris', 70, 70);
     g.clear();
-    g.fillStyle(0xffffff).fillCircle(3, 3, 3);
-    g.generateTexture('particle', 6, 6);
     
+    // === 3.1 БОСС 1 - Грозовая Туча (120x120) ===
+    g.fillStyle(0x333344);
+    g.fillCircle(60, 60, 45);
+    g.lineStyle(4, 0xffff00);
+    for(let i=0; i<8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        g.beginPath();
+        g.moveTo(60 + Math.cos(angle) * 40, 60 + Math.sin(angle) * 40);
+        g.lineTo(60 + Math.cos(angle) * 65, 60 + Math.sin(angle) * 65);
+        g.strokePath();
+    }
+    g.fillStyle(0xff0000);
+    g.fillCircle(45, 50, Math.max(12, 10) / 2);
+    g.fillCircle(75, 50, Math.max(12, 10) / 2);
+    g.fillStyle(0x000000);
+    g.fillCircle(45, 50, 4);
+    g.fillCircle(75, 50, 4);
+    g.lineStyle(4, 0x000000);
+    g.beginPath();
+    g.moveTo(35, 40);
+    g.lineTo(52, 44);
+    g.moveTo(85, 40);
+    g.lineTo(68, 44);
+    g.strokePath();
+    g.lineStyle(4, 0xff0000);
+    g.beginPath();
+    g.arc(60, 78, 14, 0.2 * Math.PI, 0.8 * Math.PI, true);
+    g.strokePath();
+    g.generateTexture('boss1', 120, 120);
     g.clear();
-    g.fillStyle(0x88ccff).fillCircle(4, 4, 4);
-    g.generateTexture('raindrop', 8, 8);
     
-    // === ФОН ===
+    // === 3.2 БОСС 2 - Штормовой Вихрь (120x120) ===
+    g.fillStyle(0x4a5a6a);
+    g.fillCircle(60, 60, 45);
+    g.lineStyle(4, 0x6a7a8a);
+    for(let arm=0; arm<4; arm++) {
+        g.beginPath();
+        for(let i=0; i<50; i++) {
+            const a = (arm / 4) * Math.PI * 2 + i * 0.15;
+            const r = 15 + i;
+            if(i===0) g.moveTo(60 + Math.cos(a) * r, 60 + Math.sin(a) * r);
+            else g.lineTo(60 + Math.cos(a) * r, 60 + Math.sin(a) * r);
+        }
+        g.strokePath();
+    }
+    g.fillStyle(0xff0000);
+    g.fillCircle(50, 55, 6);
+    g.fillCircle(70, 55, 6);
+    g.fillStyle(0x000000);
+    g.fillCircle(50, 55, 2);
+    g.fillCircle(70, 55, 2);
+    g.lineStyle(3, 0xff0000);
+    g.beginPath();
+    g.arc(60, 75, 12, 0.2 * Math.PI, 0.8 * Math.PI, true);
+    g.strokePath();
+    g.generateTexture('boss2', 120, 120);
     g.clear();
-    g.fillStyle(0xffffff).fillCircle(8, 8, 8);
-    g.generateTexture('cloud_bg', 16, 16);
     
+    // === 3.3 БОСС 3 - Затмение (120x120) ===
+    for(let i=0; i<12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        g.fillStyle(0xff6600);
+        g.beginPath();
+        g.moveTo(60 + Math.cos(a) * 45, 60 + Math.sin(a) * 45);
+        g.lineTo(60 + Math.cos(a) * 65, 60 + Math.sin(a) * 65);
+        g.lineTo(60 + Math.cos(a + 0.26) * 45, 60 + Math.sin(a + 0.26) * 45);
+        g.fill();
+    }
+    g.fillStyle(0xffcc00);
+    g.fillCircle(60, 60, 45);
+    g.fillStyle(0x111111);
+    g.fillCircle(75, 60, 42);
+    g.fillStyle(0xff0000);
+    g.fillCircle(68, 50, 6);
+    g.fillCircle(82, 50, 6);
+    g.fillStyle(0x000000);
+    g.fillCircle(68, 50, 2);
+    g.fillCircle(82, 50, 2);
+    g.lineStyle(3, 0xff0000);
+    g.beginPath();
+    g.arc(75, 75, 12, 0.2 * Math.PI, 0.8 * Math.PI, true);
+    g.strokePath();
+    g.generateTexture('boss3', 120, 120);
     g.clear();
-    g.fillStyle(0xffffff).fillCircle(2, 2, 2);
-    g.generateTexture('star', 4, 4);
+    
+    // === 3.4 БОСС 4 - Ледяной Гигант (120x120) ===
+    g.fillStyle(0xaaddff);
+    g.fillCircle(60, 60, 48);
+    g.fillStyle(0x4488cc);
+    g.fillCircle(50, 50, 40);
+    g.fillStyle(0x004488);
+    g.fillCircle(70, 70, 35);
+    g.fillStyle(0x00ffff);
+    g.fillCircle(45, 50, Math.max(12, 10) / 2);
+    g.fillCircle(75, 50, Math.max(12, 10) / 2);
+    g.fillStyle(0x000000);
+    g.fillCircle(45, 50, 4);
+    g.fillCircle(75, 50, 4);
+    g.lineStyle(4, 0xaaddff);
+    g.beginPath();
+    g.moveTo(35, 38);
+    g.lineTo(52, 42);
+    g.moveTo(85, 38);
+    g.lineTo(68, 42);
+    g.strokePath();
+    g.lineStyle(3, 0x00ffff);
+    g.beginPath();
+    g.arc(60, 80, 14, 0.2 * Math.PI, 0.8 * Math.PI, true);
+    g.strokePath();
+    g.generateTexture('boss4', 120, 120);
+    g.clear();
+    
+    // === 3.5 БОСС 5 - Чёрная Дыра (120x120) - НАСМЕШЛИВАЯ (вариант 5) ===
+    // Фиолетовая аура
+    g.fillStyle('rgba(200,0,200,0.4)');
+    g.fillCircle(60, 60, 70);
+    // Чёрная дыра
+    g.fillStyle(0x000000);
+    g.fillCircle(60, 60, 50);
+    g.lineStyle(4, 0xcc00cc);
+    g.strokeCircle(60, 60, 50);
+    // Насмешливые глаза
+    g.fillStyle(0xff66ff);
+    g.fillCircle(45, 50, 14);
+    g.fillCircle(75, 50, 14);
+    // Зрачки
+    g.fillStyle(0x000000);
+    g.fillCircle(43, 48, 5);
+    g.fillCircle(77, 48, 5);
+    // Поднятая бровь (одна выше другой)
+    g.lineStyle(4, 0xff66ff);
+    g.beginPath();
+    g.moveTo(30, 35);
+    g.lineTo(55, 38);
+    g.moveTo(90, 32);
+    g.lineTo(65, 38);
+    g.strokePath();
+    // Насмешливая полуулыбка
+    g.lineStyle(5, 0xff66ff);
+    g.beginPath();
+    g.arc(65, 75, 28, 0.25*Math.PI, 0.75*Math.PI, false);
+    g.strokePath();
+    g.generateTexture('boss5', 120, 120);
+    g.clear();
+    
+    // === 4.1 ПУЛЯ обычная (24x40) ===
+    g.fillStyle(0xffffff);
+    g.fillCircle(12, 20, Math.max(5, 15) / 2);
+    g.generateTexture('bullet', 24, 40);
+    g.clear();
+    
+    // === 4.2 ПУЛЯ усиленная (32x32) ===
+    // Градиент заменён на цвет
+    g.fillStyle(0xffffff);
+    g.fillCircle(16, 16, 14);
+    g.lineStyle(2, 0x00ffff);
+    g.fillStyle(0xffffff);
+    g.fillCircle(16, 16, 14);
+    g.lineStyle(2, 'rgba(0,255,255,0.5)');
+    g.strokeCircle(16, 16, 16);
+    g.generateTexture('bullet_double', 32, 32);
+    g.clear();
+    
+    // === 5.1 БОНУС Зелёный (50x50) ===
+    g.fillStyle(0x00ff00);
+    g.fillCircle(25, 25, 23);
+    g.lineStyle(3, 0xffffff);
+    g.strokeCircle(25, 25, 23);
+    g.lineStyle(3, 0xffffff);
+    g.beginPath();
+    g.moveTo(31, 13);
+    g.lineTo(19, 25);
+    g.lineTo(27, 25);
+    g.lineTo(19, 39);
+    g.strokePath();
+    g.generateTexture('bonus_double', 50, 50);
+    g.clear();
+    
+    // === 5.2 БОНУС Жёлтый (50x50) ===
+    g.fillStyle(0xffff00);
+    g.fillCircle(25, 25, 23);
+    g.lineStyle(3, 0xffffff);
+    g.strokeCircle(25, 25, 23);
+    g.lineStyle(2.5, 0xffffff);
+    g.beginPath();
+    for(let i=0; i<5; i++) {
+        const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+        const inner = a + Math.PI / 5;
+        if(i===0) g.moveTo(25 + Math.cos(a) * 14, 25 + Math.sin(a) * 14);
+        else g.lineTo(25 + Math.cos(a) * 14, 25 + Math.sin(a) * 14);
+        g.lineTo(25 + Math.cos(inner) * 6, 25 + Math.sin(inner) * 6);
+    }
+    g.closePath();
+    g.strokePath();
+    g.generateTexture('bonus_speed', 50, 50);
+    g.clear();
+    
+    // === 5.3 БОНУС Фиолетовый (50x50) ===
+    g.fillStyle(0xff00ff);
+    g.fillCircle(25, 25, 23);
+    g.lineStyle(3, 0xffffff);
+    g.strokeCircle(25, 25, 23);
+    g.lineStyle(3, 0xffffff);
+    g.beginPath();
+    g.moveTo(25, 13);
+    g.lineTo(18, 25);
+    g.lineTo(22, 25);
+    g.lineTo(22, 35);
+    g.lineTo(28, 35);
+    g.lineTo(28, 25);
+    g.lineTo(32, 25);
+    g.closePath();
+    g.strokePath();
+    g.generateTexture('bonus_damage', 50, 50);
+    g.clear();
+    
+    // === 5.4 БОНУС Красный - сердечко (50x50) ===
+    g.fillStyle(0xff0000);
+    g.fillCircle(18, 22, 8);
+    g.fillCircle(32, 22, 8);
+    g.beginPath();
+    g.moveTo(10, 22);
+    g.lineTo(25, 42);
+    g.lineTo(40, 22);
+    g.fill();
+    g.fillStyle('rgba(255,255,255,0.4)');
+    g.fillCircle(20, 19, 3);
+    g.generateTexture('bonus_heart', 50, 50);
+    g.clear();
+    
+    // === 6. ФОНОВОЕ ОБЛАКО (100x50) ===
+    g.fillStyle('rgba(255,255,255,0.1)');
+    g.fillCircle(50, 25, Math.max(35, 12) / 2);
+    g.fillStyle('rgba(255,255,255,0.1)');
+    g.fillCircle(30, 21, 10);
+    g.fillCircle(70, 21, 10);
+    g.generateTexture('cloud_bg', 100, 50);
+    g.clear();
+    
+    // === 7.1 ПЛАНЕТА 1 - Меркурий (120x120) - из gallery_v4.html ===
+    // Градиент: ff8866 → cc5533 → 662211
+    g.fillStyle(0xff8866);
+    g.fillCircle(60, 60, 50);
+    g.fillStyle(0xcc5533);
+    g.fillCircle(60, 60, 45);
+    g.fillStyle(0x662211);
+    g.fillCircle(60, 60, 40);
+    // Кратеры
+    g.fillStyle('rgba(100,40,20,0.6)');
+    for(let i=0; i<13; i++) {
+        g.fillCircle(60 + ((i%7)-3)*10, 60 + ((i%5)-2)*10, 3 + ((i%4)*2));
+    }
+    g.generateTexture('planet1', 120, 120);
+    g.clear();
+
+    // === 7.2 ПЛАНЕТА 2 - Венера (120x120) - из gallery_v4.html ===
+    // Градиент: ffcc88 → ff9944 → cc6600 + полосы
+    g.fillStyle(0xffcc88);
+    g.fillCircle(60, 60, 48);
+    g.fillStyle(0xff9944);
+    g.fillCircle(60, 60, 44);
+    g.fillStyle(0xcc6600);
+    g.fillCircle(60, 60, 40);
+    // Полосы облаков (эллипсы заменены на круги)
+    g.fillStyle('rgba(255,200,150,0.4)');
+    for(let i=0; i<5; i++) {
+        g.fillCircle(60, 60 - 20 + i*10, 22);
+    }
+    g.generateTexture('planet2', 120, 120);
+    g.clear();
+
+    // === 7.3 ПЛАНЕТА 3 - Земля (120x120) - из gallery_v4.html ===
+    // Градиент: 4488ff → 003388 + континенты
+    g.fillStyle(0x4488ff);
+    g.fillCircle(60, 60, 50);
+    g.fillStyle(0x003388);
+    g.fillCircle(60, 60, 46);
+    // Континенты
+    g.fillStyle(0x44aa44);
+    g.fillCircle(45, 50, 18);
+    g.fillCircle(80, 65, 16);
+    // Облака
+    g.fillStyle('rgba(255,255,255,0.4)');
+    for(let i=0; i<4; i++) {
+        g.fillCircle(60 + ((i%5)-2)*15, 60 + ((i%3)-1)*20, 10);
+    }
+    g.generateTexture('planet3', 120, 120);
+    g.clear();
+
+    // === 7.4 ПЛАНЕТА 4 - Газовый гигант (120x120) - из gallery_v4.html ===
+    // Градиент: 88ff88 → 44aa44 → 006600 + полосы
+    g.fillStyle(0x88ff88);
+    g.fillCircle(60, 60, 52);
+    g.fillStyle(0x44aa44);
+    g.fillCircle(60, 60, 48);
+    g.fillStyle(0x006600);
+    g.fillCircle(60, 60, 44);
+    // Полосы
+    const colors = [0x66cc66, 0x44aa44, 0x228822, 0x006600, 0x66dd66];
+    g.globalAlpha = 0.6;
+    for(let i=0; i<8; i++) {
+        g.fillStyle(colors[(7+i)%5]);
+        g.fillCircle(60, 60 - 25 + i*8, 20);
+    }
+    g.globalAlpha = 1;
+    g.generateTexture('planet4', 120, 120);
+    g.clear();
+
+    // === 7.5 ПЛАНЕТА 5 - Ледяной гигант с кольцами (120x120) - из gallery_v4.html ===
+    // Градиент: cc88ff → 8844cc → 440088 + кольца
+    g.fillStyle(0xcc88ff);
+    g.fillCircle(60, 60, 45);
+    g.fillStyle(0x8844cc);
+    g.fillCircle(60, 60, 41);
+    g.fillStyle(0x440088);
+    g.fillCircle(60, 60, 37);
+    // Кольца (эллипсы заменены на окружности)
+    g.lineStyle(8, 'rgba(200,180,220,0.6)');
+    g.strokeCircle(60, 60, 75);
+    g.lineStyle(5, 'rgba(180,160,200,0.4)');
+    g.strokeCircle(60, 60, 68);
+    g.generateTexture('planet5', 120, 120);
+    g.clear();
+
+    // === 8. ГАЛАКТИКА (250x250) - из gallery_v4.html ===
+    // Центр (градиент: white →ffffcc → transparent)
+    g.fillStyle(0xffffff);
+    g.fillCircle(125, 125, 50);
+    g.fillStyle(0xffffcc);
+    g.fillCircle(125, 125, 45);
+    // 4 спиральных рукава с 150 звёздами каждый
+    const armColors = [0xaaccff, 0xffcccc, 0xffffaa, 0xccffcc];
+    for(let arm=0; arm<4; arm++) {
+        for(let i=0; i<150; i++) {
+            const a = (arm/4)*Math.PI*2 + i*0.03;
+            const r = 50 + i*0.8;
+            const spread = ((i%5)-2)*2;
+            const x = 125 + Math.cos(a)*r + Math.cos(a+Math.PI/2)*spread;
+            const y = 125 + Math.sin(a)*r*0.7 + Math.sin(a+Math.PI/2)*spread;
+            g.globalAlpha = 0.1 + (150-i)/150*0.4;
+            g.fillStyle(armColors[arm]);
+            g.fillCircle(x, y, 1.5);
+        }
+    }
+    g.globalAlpha = 1;
+    g.generateTexture('galaxy', 250, 250);
+    g.clear();
+    
+    // === 8.5 ФИНАЛЬНАЯ ЧЁРНАЯ ДЫРА (250x250) - из blackhole_final.html вариант 5 ===
+    // Аура
+    g.fillStyle('rgba(200,0,200,0.4)');
+    g.fillCircle(125, 125, 125);
+    // Чёрная дыра
+    g.fillStyle(0x000000);
+    g.fillCircle(125, 125, 80);
+    g.lineStyle(4, 0xcc00cc);
+    g.strokeCircle(125, 125, 80);
+    // Насмешливые глаза
+    g.fillStyle(0xff66ff);
+    g.fillCircle(95, 105, 18);
+    g.fillCircle(155, 105, 18);
+    // Зрачки
+    g.fillStyle(0x000000);
+    g.fillCircle(93, 103, 6);
+    g.fillCircle(157, 103, 6);
+    // Поднятая бровь
+    g.lineStyle(4, 0xff66ff);
+    g.beginPath();
+    g.moveTo(75, 85);
+    g.lineTo(105, 88);
+    g.moveTo(175, 85);
+    g.lineTo(145, 88);
+    g.strokePath();
+    // Насмешливая полуулыбка
+    g.lineStyle(5, 0xff66ff);
+    g.beginPath();
+    g.arc(135, 135, 40, 0.25*Math.PI, 0.75*Math.PI, false);
+    g.strokePath();
+    g.generateTexture('final_blackhole', 250, 250);
+    g.clear();
+    
+    // === 9.1 ЧАСТИЦЫ (80x80) ===
+    for(let i=0; i<12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        const x = 40 + Math.cos(a) * 30;
+        const y = 40 + Math.sin(a) * 30;
+        g.fillStyle(0x88ccff);
+        g.fillCircle(x, y, 6);
+    }
+    g.generateTexture('particle', 80, 80);
+    g.clear();
+    
+    // === 9.2 КАПЛИ ДОЖДЯ (40x60) ===
+    for(let i=0; i<5; i++) {
+        g.fillStyle(0x88ccff);
+        g.fillCircle(15 + i*3, 30, Math.max(2, 15) / 2);
+    }
+    g.generateTexture('raindrop', 40, 60);
+    g.clear();
 }
-
-// ============================================================================
-// CREATE
-// ============================================================================
-
 function create() {
     this.cameras.main.setBackgroundColor(LEVEL_CONFIG[1].color);
     
@@ -479,6 +712,7 @@ function create() {
     // === ИГРОК ===
     player = this.physics.add.sprite(config.width/2, config.height - 100, 'sun_normal');
     player.setCollideWorldBounds(true);
+    player.setDisplaySize(60, 60); // Уменьшаем до игрового размера (текстура 80x80)
     
     // === ГРУППЫ ===
     bullets = this.physics.add.group();
@@ -531,7 +765,7 @@ function create() {
     
     // === УПРАВЛЕНИЕ ===
     this.input.on('pointermove', (p) => {
-        if(player.active && gameState === "playing") {
+        if(player && player.active && gameState === "playing") {
             player.x = Phaser.Math.Clamp(p.x, 20, config.width - 20);
             player.y = Phaser.Math.Clamp(p.y - 20, 20, config.height - 20);
         }
@@ -591,6 +825,9 @@ function spawnEnemy() {
     const x = Phaser.Math.Between(40, config.width - 40);
     const enemy = clouds.create(x, -50, cfg.enemy);
     
+    // Показ надписи нового врага
+    showNewEnemyText(this, cfg.enemy);
+    
     if(enemy) {
         // HP врага растёт с уровнем
         enemy.hp = getEnemyHp(cfg.enemyHp);
@@ -634,6 +871,8 @@ function fire() {
             if(b) {
                 // Tint в зелёный
                 b.setTint(0x00ff00);
+                // ← ЗАЩИТА ОТ ЗАВИСАНИЯ: флаг попадания
+                b.hasHit = false;
                 
                 // Угол для этой пули
                 const angle = ((i / centerX) * spreadAngle - (spreadAngle / 2)) * (Math.PI / 180);
@@ -655,6 +894,7 @@ function fire() {
             const b = bullets.create(startX + (i * spacing), player.y - 20, 'bullet');
             if(b) {
                 b.setVelocityY(-600);
+                b.hasHit = false;  // ← ЗАЩИТА ОТ ЗАВИСАНИЯ
             }
         }
     } else {
@@ -667,14 +907,21 @@ function fire() {
             if(b) {
                 b.setVelocityY(-500);
                 b.setVelocityX(positions[posIndex]);
+                b.hasHit = false;  // ← ЗАЩИТА ОТ ЗАВИСАНИЯ
             }
         }
     }
 }
 
 function hitEnemy(bullet, enemy) {
-    // Защита от повторных вызовов
+    // ← ПРОВЕРКА №1: Если пуля уже попала - выходим (ЗАЩИТА ОТ ЗАВИСАНИЯ)
+    if(bullet.hasHit) return;
+    
+    // ← ПРОВЕРКА №2: Если объекты неактивны - выходим
     if(!bullet.active || !enemy.active) return;
+    
+    // ← ПРОВЕРКА №3: Помечаем пулю как попавшую
+    bullet.hasHit = true;
     
     // Сразу деактивируем пулю
     bullet.destroy();
@@ -875,38 +1122,31 @@ function prepareBoss() {
     
     clouds.clear(true, true);
     
-    // === НАДПИСЬ "БОСС!" (яркая, крупная, с анимацией) ===
-    const bossWarning = this.add.text(config.width/2, config.height/2 - 50, '⚠️ БОСС! ⚠️', {
-        fontSize: '120px',
-        fill: '#ff0000',
-        fontWeight: 'bold',
-        stroke: '#000000',
-        strokeThickness: 8
-    }).setOrigin(0.5).setDepth(200);
+    // === БОСС ПОЯВЛЯЕТСЯ ===
+    boss = this.physics.add.sprite(config.width/2, -100, 'boss' + level);
     
-    // Пульсация
+    // Босс неактивен и мигает пока показывается надпись (2 сек)
+    boss.alpha = 0.5;
+    boss.visible = true;
+    
+    // Мигание босса
     this.tweens.add({
-        targets: bossWarning,
-        scale: 1.3,
+        targets: boss,
+        alpha: 0.2,
         duration: 200,
         yoyo: true,
-        repeat: 2
+        repeat: 5
     });
     
-    // Исчезновение через 1 секунду
-    this.time.delayedCall(1000, () => {
-        this.tweens.add({
-            targets: bossWarning,
-            alpha: 0,
-            y: bossWarning.y - 50,
-            duration: 300,
-            onComplete: () => bossWarning.destroy()
-        });
-    });
+    // Показ надписи босса (2 секунды)
+    showBossText(this, level);
     
-    boss = this.physics.add.sprite(config.width/2, -100, 'boss' + level);
-    boss.maxHp = 20 + (level * 20);
-    boss.hp = boss.maxHp;
+    // После надписи босс становится активным
+    this.time.delayedCall(2000, () => {
+        boss.alpha = 1;
+        boss.maxHp = 20 + (level * 20);
+        boss.hp = boss.maxHp;
+    });
     
     this.tweens.add({
         targets: boss,
@@ -1010,6 +1250,7 @@ function startEnding() {
     SFX.finalVictory();
     
     player.setTexture('sun_happy');
+    player.setDisplaySize(60, 60); // Тот же размер что и обычное
     
     this.tweens.add({
         targets: player,
@@ -1025,18 +1266,18 @@ function startEnding() {
 function showSpaceScene() {
     this.cameras.main.setBackgroundColor('#000000');
     
+    // ПЛАНЕТЫ из текстур (по 5 штук каждой)
     const planets = [];
-    const colors = [0xff4500, 0xffa500, 0x1e90ff, 0x32cd32, 0x8b4513];
+    const planetTextures = ['planet1', 'planet2', 'planet3', 'planet4', 'planet5'];
     
     for(let i=0; i<5; i++) {
         const angle = (i / 5) * Math.PI * 2;
-        const dist = 80 + (i * 20);
-        const p = this.add.circle(
+        const dist = 100 + (i * 30);
+        const p = this.add.image(
             config.width/2 + Math.cos(angle) * dist,
             config.height/2 + Math.sin(angle) * dist,
-            15 - (i * 2),
-            colors[i]
-        );
+            planetTextures[i]
+        ).setDisplaySize(60 - i*8, 60 - i*8);
         planets.push(p);
     }
     
@@ -1050,34 +1291,20 @@ function showSpaceScene() {
     this.time.delayedCall(4000, () => {
         this.cameras.main.zoomTo(0.1, 6000);
         
-        const galaxy = this.add.graphics();
-        galaxy.lineStyle(2, 0xffffff, 0.3);
-        
-        for(let i=0; i<500; i++) {
-            const r = i * 3;
-            const a = i * 0.1;
-            galaxy.strokeCircle(
-                config.width/2 + Math.cos(a) * r,
-                config.height/2 + Math.sin(a) * r,
-                1
-            );
-        }
+        // ГАЛАКТИКА из текстуры
+        const galaxy = this.add.image(config.width/2, config.height/2, 'galaxy')
+            .setDisplaySize(2000, 2000);
         
         this.time.delayedCall(6000, () => {
             SFX.evilMelody();
             
-            // ЧЁРНАЯ ДЫРА (огромная)
-            const bh = this.add.text(config.width * 5, config.height/2, '🌑', {
-                fontSize: '1000px'
-            }).setOrigin(0.5).setDepth(100);
-            
-            // ГЛАЗА (увеличены в 5 раз - было 200, стало 1000)
-            const eyes = this.add.text(config.width * 4.8, config.height/2, '👁️ 👁️', {
-                fontSize: '1000px'
-            }).setOrigin(0.5).setDepth(101);
+            // ЧЁРНАЯ ДЫРА (из texture final_blackhole) - в 2 раза больше
+            const bh = this.add.image(config.width * 5, config.height/2, 'final_blackhole')
+                .setDisplaySize(2000, 2000)
+                .setDepth(100);
             
             this.tweens.add({
-                targets: [bh, eyes],
+                targets: bh,
                 x: config.width/2,
                 duration: 5000,
                 ease: 'Power2'
@@ -1171,4 +1398,81 @@ const LEVEL_CONFIG = {
 // Функция для получения HP врага с учётом уровня
 function getEnemyHp(baseHp) {
     return baseHp + Math.floor(level / 2);
+}
+
+// === НОВЫЙ КОД - НАДПИСИ ДЛЯ ВРАГОВ И БОССОВ ===
+
+// Переменные для отслеживания показанных врагов
+let shownEnemies = {};
+let shownBosses = {};
+
+// Функция показа надписи нового врага
+function showNewEnemyText(scene, enemyType) {
+    if(shownEnemies[enemyType]) return;
+    shownEnemies[enemyType] = true;
+    
+    const texts = {
+        'cloud1': 'Злое Облако',
+        'cloud2': 'Грозовая туча',
+        'cloud3': 'Перистые облака',
+        'crystal': 'Кристалл холода',
+        'debris': 'Техно-мусор'
+    };
+    
+    const name = texts[enemyType] || enemyType;
+    showAnimatedText(scene, 'НОВЫЙ ВРАГ:\n' + name, 0xff0000, 2000);
+}
+
+// Функция показа надписи босса
+function showBossText(scene, bossNum) {
+    if(shownBosses[bossNum]) return;
+    shownBosses[bossNum] = true;
+    
+    const texts = {
+        1: 'Взрывной ураган',
+        2: 'Штормовой Вихрь',
+        3: 'Затмение',
+        4: 'Ледяной Гигант',
+        5: 'Чёрная Дыра'
+    };
+    
+    const name = texts[bossNum] || 'Босс ' + bossNum;
+    // Длительность 2 секунды (в 2 раза дольше)
+    showAnimatedText(scene, 'БОСС:\n' + name, 0xff00ff, 2000);
+}
+
+// Функция показа анимированной надписи
+function showAnimatedText(scene, text, color, duration) {
+    const lines = text.split('\n');
+    const startY = config.height / 2 - (lines.length - 1) * 20;
+    
+    lines.forEach((line, i) => {
+        const txt = scene.add.text(config.width / 2, startY + i * 40, line, {
+            fontSize: '48px',
+            fontWeight: 'bold',
+            color: '#' + color.toString(16).padStart(6, '0'),
+            stroke: '#ffffff',
+            strokeThickness: 6
+        }).setOrigin(0.5);
+        
+        txt.alpha = 0;
+        txt.scale = 0.5;
+        
+        scene.tweens.add({
+            targets: txt,
+            alpha: 1,
+            scale: 1.2,
+            duration: 300,
+            ease: 'Back.out'
+        });
+        
+        scene.tweens.add({
+            targets: txt,
+            alpha: 0,
+            scale: 0.8,
+            delay: duration - 500,
+            duration: 500,
+            onComplete: () => txt.destroy()
+        });
+    });
 }
