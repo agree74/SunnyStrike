@@ -1212,9 +1212,9 @@ function updateBossBar() {
     
     bossBar.clear();
     
-    // Полоска здоровья по центру вверху
-    const barWidth = 200;
-    const barHeight = 15;
+    // Полоска здоровья по центру вверху (уменьшена для мобильных)
+    const barWidth = 140;
+    const barHeight = 12;
     const barX = (config.width / 2) - (barWidth / 2);
     const barY = 20;
     
@@ -1310,15 +1310,15 @@ function showSpaceScene() {
                 ease: 'Power2'
             });
             
-            // НАДПИСЬ (увеличена в 4 раза, под чёрной дырой)
+            // НАДПИСЬ (уменьшена для мобильных)
             this.time.delayedCall(5500, () => {
                 const finText = this.add.text(config.width/2, config.height/2 + 400, 
                     'ПРОДОЛЖЕНИЕ СЛЕДУЕТ...', {
-                    fontSize: '320px',  // Увеличено с 80 до 320 (в 4 раза)
+                    fontSize: '48px',
                     fill: '#ffffff',
                     fontWeight: 'bold',
                     stroke: '#ff00ff',
-                    strokeThickness: 12
+                    strokeThickness: 6
                 }).setOrigin(0.5).setDepth(102);
                 
                 this.time.delayedCall(6000, () => {
@@ -1448,11 +1448,11 @@ function showAnimatedText(scene, text, color, duration) {
     
     lines.forEach((line, i) => {
         const txt = scene.add.text(config.width / 2, startY + i * 40, line, {
-            fontSize: '48px',
+            fontSize: '28px',
             fontWeight: 'bold',
             color: '#' + color.toString(16).padStart(6, '0'),
             stroke: '#ffffff',
-            strokeThickness: 6
+            strokeThickness: 4
         }).setOrigin(0.5);
         
         txt.alpha = 0;
