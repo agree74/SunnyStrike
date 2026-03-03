@@ -65,16 +65,16 @@ function playSFX(scene, type) {
             [523, 440, 349, 261].forEach((f, i) => osc(f, f - 50, 0.15, 'square', now + i * 0.1));
             break;
             
-        case 'boss_win': // Ретро уровень пройден
+        case 'boss_win': // Победа над боссом (уровни 1-4)
             [523, 659, 783, 1046].forEach((f, i) => osc(f, f, 0.4, 'square', now + i * 0.08));
             break;
             
-        case 'final_win': // Победный фанфар
+        case 'boss5_win': // Победа над боссом 5 (начало финала)
             [523, 523, 523, 698].forEach((f, i) => osc(f, f, 0.6, 'sawtooth', now + i * 0.15));
             osc(1046, 1046, 1.2, 'sawtooth', now + 0.6, 0.05);
             break;
             
-        case 'game_over': // Трагический финал
+        case 'game_over': // Проигрыш (грустная мелодия)
             [392, 370, 349].forEach((f, i) => osc(f, f - 10, 1.2, 'sawtooth', now + i * 0.6));
             break;
             
@@ -97,7 +97,7 @@ function playSFX(scene, type) {
 // ============================================================================
 
 const config = {
-    type: Phaser.AUTO,
+    type: Phaser.AUTO,  // Автоматический выбор (WebGL или Canvas)
     width: window.innerWidth,
     height: window.innerHeight,
     parent: 'game-container',
@@ -109,7 +109,8 @@ const config = {
         default: 'arcade',
         arcade: { gravity: { y: 0 }, debug: false }
     },
-    scene: { preload, create, update }
+    scene: { preload, create, update },
+    backgroundColor: '#4ea1d3'
 };
 
 const game = new Phaser.Game(config);
@@ -1316,7 +1317,7 @@ function startEnding() {
     bossBar.clear();
     if(boss) boss.destroy();
     
-    playSFX(this, 'final_win');
+    playSFX(this, 'boss5_win');
     
     player.setTexture('sun_happy');
     player.setDisplaySize(40, 40);
