@@ -27,51 +27,70 @@ let exitButton;
 function initAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    console.log('initAudio вызван, состояние:', audioCtx.state);
+    //console.log('initAudio вызван, состояние:', audioCtx.state);
 }
 
-function playSound(freq, type, duration, vol = 0.1) {
-    if (!audioCtx) {
-        console.log('Звук: audioCtx не создан!');
-        return;
-    }
-    if (audioCtx.state === 'suspended') {
-        console.log('Звук: audioCtx suspended, resume...');
-        audioCtx.resume();
-    }
-    try {
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
-        osc.stop(audioCtx.currentTime + duration);
-        console.log('Звук:', freq + 'Hz', type, duration + 'сек');
-    } catch(e) {
-        console.error('Ошибка звука:', e);
+// ============================================================================
+// PROCEDURAL SYNTHESIS (Phaser 3 Web Audio API)
+// ============================================================================
+
+// Компактный процедурный синтезатор звуков
+function playSFX(scene, type) {
+    const ctx = scene.sound.context;
+    if (ctx.state === 'suspended') ctx.resume();
+    const now = ctx.currentTime;
+
+    const osc = (f, e, d, w, t = now, v = 0.1) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = w;
+        o.frequency.setValueAtTime(f, t);
+        if (f !== e) o.frequency.exponentialRampToValueAtTime(e, t + d);
+        g.gain.setValueAtTime(v, t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+        o.connect(g).connect(ctx.destination);
+        o.start(t); o.stop(t + d);
+    };
+
+    switch(type) {
+        case 'shoot': // 8-бит Пиу
+            osc(600, 100, 0.2, 'triangle'); 
+            break;
+            
+        case 'hit': // Всплеск/Слизь
+            osc(400, 50, 0.2, 'sine'); 
+            break;
+            
+        case 'hurt': // Цифровой спад (Потеря жизни)
+            [523, 440, 349, 261].forEach((f, i) => osc(f, f - 50, 0.15, 'square', now + i * 0.1));
+            break;
+            
+        case 'boss_win': // Ретро уровень пройден
+            [523, 659, 783, 1046].forEach((f, i) => osc(f, f, 0.4, 'square', now + i * 0.08));
+            break;
+            
+        case 'final_win': // Победный фанфар
+            [523, 523, 523, 698].forEach((f, i) => osc(f, f, 0.6, 'sawtooth', now + i * 0.15));
+            osc(1046, 1046, 1.2, 'sawtooth', now + 0.6, 0.05);
+            break;
+            
+        case 'game_over': // Трагический финал
+            [392, 370, 349].forEach((f, i) => osc(f, f - 10, 1.2, 'sawtooth', now + i * 0.6));
+            break;
+            
+        case 'evil_triumph': // Торжество зла (Черная дыра)
+            [110, 103, 98, 82].forEach((f, i) => osc(f, f, 1.5, 'sawtooth', now + i * 0.8, 0.07));
+            break;
+            
+        case 'powerup': // Бонус
+            osc(800, 1200, 0.3, 'triangle', now, 0.1);
+            break;
+            
+        case 'enemy_death': // Смерть врага
+            osc(100, 50, 0.15, 'triangle', now, 0.15);
+            break;
     }
 }
-
-const SFX = {
-    shoot: () => playSound(450, 'square', 0.05, 0.02),
-    hit: () => playSound(150, 'sine', 0.1, 0.2),
-    enemyDeath: () => playSound(100, 'triangle', 0.15, 0.15),
-    playerHit: () => playSound(100, 'sawtooth', 0.4, 0.3),
-    bossWin: () => {
-        [523, 659, 783].forEach((f, i) => setTimeout(() => playSound(f, 'triangle', 0.3, 0.1), i * 100));
-    },
-    finalVictory: () => {
-        [523, 659, 783, 1046].forEach((f, i) => setTimeout(() => playSound(f, 'square', 0.5, 0.1), i * 200));
-    },
-    evilMelody: () => {
-        [80, 75, 70, 60].forEach((f, i) => setTimeout(() => playSound(f, 'sawtooth', 1.2, 0.3), i * 600));
-    },
-    powerup: () => playSound(800, 'triangle', 0.3, 0.1)
-};
 
 // ============================================================================
 // PHASER CONFIG
@@ -696,6 +715,11 @@ function preload() {
     g.clear();
 }
 function create() {
+    // Фикс для Web Audio API (активация контекста)
+    if (this.sound.context.state === 'suspended') {
+        this.sound.context.resume();
+    }
+    
     this.cameras.main.setBackgroundColor(LEVEL_CONFIG[1].color);
     
     // === ФОН ===
@@ -759,7 +783,7 @@ function create() {
         if(!audioInitialized) {
             initAudio();
             audioInitialized = true;
-            console.log('Аудио инициализировано!');
+            //console.log('Аудио инициализировано!');
         }
     });
     
@@ -831,7 +855,17 @@ function spawnEnemy() {
     if(enemy) {
         // HP врага растёт с уровнем
         enemy.hp = getEnemyHp(cfg.enemyHp);
-        enemy.setVelocityY(cfg.speed);
+        
+        // Базовая скорость растёт с уровнем (множитель 1.1)
+        const baseSpeed = cfg.speed * Math.pow(1.1, level - 1);
+        // Рандомная скорость: 0.8 - 1.2 от базовой (каждое облако имеет свою скорость)
+        const randomFactor = Phaser.Math.FloatBetween(0.8, 1.2);
+        const speed = baseSpeed * randomFactor;
+        
+        enemy.setVelocityY(speed);
+        
+        // Отладка в консоль
+        //console.log('Облако ' + cfg.enemy + ': скорость=' + speed.toFixed(1) + ' (база=' + baseSpeed.toFixed(1) + ', рандом=' + randomFactor.toFixed(2) + ')');
         
         if(level >= 2) {
             this.tweens.add({
@@ -848,7 +882,7 @@ function spawnEnemy() {
 function fire() {
     if(gameState !== "playing" || !player.active) return;
     
-    SFX.shoot();
+    playSFX(this, 'shoot');
     
     // Определяем количество и тип пуль
     let totalBullets = bulletMultiplier;
@@ -873,6 +907,8 @@ function fire() {
                 b.setTint(0x00ff00);
                 // ← ЗАЩИТА ОТ ЗАВИСАНИЯ: флаг попадания
                 b.hasHit = false;
+                // Увеличенный хитбокс для лучшей коллизии
+                b.body.setSize(20, 35);
                 
                 // Угол для этой пули
                 const angle = ((i / centerX) * spreadAngle - (spreadAngle / 2)) * (Math.PI / 180);
@@ -895,6 +931,8 @@ function fire() {
             if(b) {
                 b.setVelocityY(-600);
                 b.hasHit = false;  // ← ЗАЩИТА ОТ ЗАВИСАНИЯ
+                // Увеличенный хитбокс для лучшей коллизии
+                b.body.setSize(20, 35);
             }
         }
     } else {
@@ -908,6 +946,8 @@ function fire() {
                 b.setVelocityY(-500);
                 b.setVelocityX(positions[posIndex]);
                 b.hasHit = false;  // ← ЗАЩИТА ОТ ЗАВИСАНИЯ
+                // Увеличенный хитбокс для лучшей коллизии
+                b.body.setSize(28, 28);
             }
         }
     }
@@ -928,11 +968,14 @@ function hitEnemy(bullet, enemy) {
     
     // Уменьшаем здоровье врага (с учётом урона игрока)
     enemy.hp -= playerDamage;
-    SFX.hit();
+    playSFX(this, 'hit');
+    
+    // Надпись урона в правом верхнем углу врага
+    showDamageText.call(this, enemy.x + 20, enemy.y - 20, playerDamage);
     
     // Если враг уничтожен
     if(enemy.hp <= 0) {
-        SFX.enemyDeath();
+        playSFX(this, 'enemy_death');
         
         // Сразу деактивируем врага (защита от повторных вызовов)
         enemy.disableBody(true, true);
@@ -959,7 +1002,7 @@ function hitEnemy(bullet, enemy) {
             const bonus = bonuses.create(enemy.x, enemy.y + 20, bonusName);
             if(bonus) {
                 bonus.setVelocityY(80);
-                console.log('Бонус создан:', bonusName, 'в точке', enemy.x, enemy.y);
+                //console.log('Бонус создан:', bonusName, 'в точке', enemy.x, enemy.y);
             }
         }
         
@@ -971,7 +1014,6 @@ function hitEnemy(bullet, enemy) {
             bestScoreText.setText('🏆: ' + bestScore);
         }
         
-        if(tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
     }
 }
 
@@ -996,42 +1038,42 @@ function collectBonus(player, bonus) {
     if(bonusType === 'bonus_double') {
         // ЗЕЛЁНЫЙ: x3 пуль на 7 сек (пули летят веером)
         greenBulletsActive = true;
-        SFX.powerup();
+        playSFX(this, 'powerup');
         bonusText.setText('x3 ПУЛИ!');
         bonusText.setTint(0x00ff00);
         this.time.delayedCall(7000, () => { greenBulletsActive = false; });
-        console.log('Зелёный бонус: x3 пули на 7 сек');
+        //console.log('Зелёный бонус: x3 пули на 7 сек');
     } else if(bonusType === 'bonus_speed') {
-        // ЖЁЛТЫЙ: кол-во пуль x2 (перманентно)
-        bulletMultiplier *= 2;
-        SFX.powerup();
+        // ЖЁЛТЫЙ: кол-во пуль +1 (перманентно)
+        bulletMultiplier += 1;
+        playSFX(this, 'powerup');
         updateDamageText();
-        bonusText.setText('x2 ПУЛИ!');
+        bonusText.setText('ПУЛИ +1!');
         bonusText.setTint(0xffff00);
-        console.log('Жёлтый бонус: пуль стало', bulletMultiplier);
+        //console.log('Жёлтый бонус: множитель пуль стал', bulletMultiplier);
     } else if(bonusType === 'bonus_damage') {
-        // ФИОЛЕТОВЫЙ: урон x2 (перманентно)
-        playerDamage *= 2;
-        SFX.powerup();
+        // ФИОЛЕТОВЫЙ: урон +1 (перманентно)
+        playerDamage += 1;
+        playSFX(this, 'powerup');
         updateDamageText();
-        bonusText.setText('УРОН x2!');
+        //console.log('Урон изменён:', playerDamage);
+        bonusText.setText('УРОН +1!');
         bonusText.setTint(0xff00ff);
-        console.log('Фиолетовый бонус: урон стал', playerDamage);
     } else if(bonusType === 'bonus_heart') {
         // +1 жизнь
         if(lives < 5) {
             lives++;
             updateLivesText.call(this);
-            SFX.powerup();
+            playSFX(this, 'powerup');
             bonusText.setText('+1 ЖИЗНЬ!');
             bonusText.setTint(0xff0000);
-            console.log('Сердечко: жизней стало', lives);
+            //console.log('Сердечко: жизней стало', lives);
         } else {
             score += 50;
             scoreText.setText('Очки: ' + score);
             bonusText.setText('+50 ОЧКОВ!');
             bonusText.setTint(0xff0000);
-            console.log('Сердечко: +50 очков (жизни полные)');
+            //console.log('Сердечко: +50 очков (жизни полные)');
         }
     }
     
@@ -1055,7 +1097,7 @@ function onPlayerHit(player, enemy) {
     lives--;
     updateLivesText.call(this);
     
-    SFX.playerHit();
+    playSFX(this, 'hurt');
     
     if(tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
     
@@ -1063,15 +1105,21 @@ function onPlayerHit(player, enemy) {
         // === GAME OVER ===
         gameState = "gameover";
         
-        // Уничтожаем все объекты
-        player.destroy();
+        // ОСТАНАВЛИВАЕМ игровые таймеры
+        if(this.spawnTimer) this.spawnTimer.remove();
+        if(this.bossTimer) this.bossTimer.remove();
+        
+        // Уничтожаем игровые объекты
         bullets.clear(true, true);
         clouds.clear(true, true);
         bonuses.clear(true, true);
         bossBar.clear();
         if(boss) boss.destroy();
+        bgClouds.clear(true, true);
         
-        // Показываем Game Over
+        // Показываем Game Over и включаем мелодию проигрыша (процедурный синтез)
+        playSFX(this, 'game_over');
+        
         const gameOverText = this.add.text(config.width/2, config.height/2, 'GAME OVER', {
             fontSize: '64px',
             fill: '#ff0000',
@@ -1087,10 +1135,16 @@ function onPlayerHit(player, enemy) {
             strokeThickness: 4
         }).setOrigin(0.5).setDepth(100);
         
-        // Отправляем счёт и закрываем
-        setTimeout(() => {
+        // Ждём 2 секунды, показываем надпись, потом очищаем всё
+        this.time.delayedCall(2000, () => {
+            // Теперь останавливаем всё
+            this.tweens.killAll();
+            this.time.removeAllEvents();
+            //this.cameras.main.stopZoom() // не существует в Phaser 3;
+            player.destroy();
+            
             sendScoreAndClose();
-        }, 2000);
+        });
         
         return;
     } else {
@@ -1120,10 +1174,13 @@ function prepareBoss() {
     
     isBossActive = true;
     
-    clouds.clear(true, true);
+    // Враги НЕ исчезают - продолжают лететь пока не вылетят за экран или не будут убиты
     
     // === БОСС ПОЯВЛЯЕТСЯ ===
     boss = this.physics.add.sprite(config.width/2, -100, 'boss' + level);
+    boss.setDisplaySize(100, 100);  // Визуальный размер меньше текстуры
+    boss.body.setSize(80, 80);  // Хитбокс ещё меньше для честного попадания
+    boss.body.setOffset(20, 20);  // Центрируем хитбокс
     
     // Босс неактивен и мигает пока показывается надпись (2 сек)
     boss.alpha = 0.5;
@@ -1164,7 +1221,10 @@ function prepareBoss() {
         
         bullet.destroy();
         bObj.hp--;
-        playSound(120, 'sawtooth', 0.05);
+        playSFX(this, 'hit');
+        
+        // Надпись урона боссу (с накоплением)
+        showBossDamageText.call(this, boss);
         
         if(bObj.hp <= 0) {
             bObj.destroy();
@@ -1180,7 +1240,7 @@ function prepareBoss() {
             }
             
             if(level < 5) {
-                SFX.bossWin();
+                playSFX(this, 'boss_win');
                 level++;
                 levelText.setText('Уровень: ' + level);
                 this.cameras.main.setBackgroundColor(LEVEL_CONFIG[level].color);
@@ -1213,7 +1273,7 @@ function updateBossBar() {
     bossBar.clear();
     
     // Полоска здоровья по центру вверху (уменьшена для мобильных)
-    const barWidth = 140;
+    const barWidth = 112;
     const barHeight = 12;
     const barX = (config.width / 2) - (barWidth / 2);
     const barY = 20;
@@ -1244,16 +1304,27 @@ function updateBossBar() {
 
 function startEnding() {
     gameState = "ending";
+    
+    // ОСТАНАВЛИВАЕМ игровые таймеры (но не tweens!)
+    if(this.spawnTimer) this.spawnTimer.remove();
+    if(this.bossTimer) this.bossTimer.remove();
+    
     clouds.clear(true, true);
     bullets.clear(true, true);
+    bgClouds.clear(true, true);
+    bonuses.clear(true, true);
+    bossBar.clear();
+    if(boss) boss.destroy();
     
-    SFX.finalVictory();
+    playSFX(this, 'final_win');
     
     player.setTexture('sun_happy');
-    player.setDisplaySize(60, 60); // Тот же размер что и обычное
+    player.setDisplaySize(40, 40);
     
+    // Солнце летит в ЦЕНТР экрана
     this.tweens.add({
         targets: player,
+        x: config.width/2,
         y: config.height/2,
         scale: 3,
         duration: 2000,
@@ -1266,18 +1337,24 @@ function startEnding() {
 function showSpaceScene() {
     this.cameras.main.setBackgroundColor('#000000');
     
-    // ПЛАНЕТЫ из текстур (по 5 штук каждой)
+    // СОЛНЦЕ СТРОГО ПО ЦЕНТРУ
+    player.x = config.width/2;
+    player.y = config.height/2;
+    player.setDepth(10);  // Солнце поверх планет
+    
+    // ПЛАНЕТЫ вокруг солнца (увеличены в 3 раза)
     const planets = [];
     const planetTextures = ['planet1', 'planet2', 'planet3', 'planet4', 'planet5'];
     
     for(let i=0; i<5; i++) {
         const angle = (i / 5) * Math.PI * 2;
-        const dist = 100 + (i * 30);
+        const dist = 150 + (i * 40);  // Увеличил расстояние
         const p = this.add.image(
             config.width/2 + Math.cos(angle) * dist,
             config.height/2 + Math.sin(angle) * dist,
             planetTextures[i]
-        ).setDisplaySize(60 - i*8, 60 - i*8);
+        ).setDisplaySize((60 - i*8) * 3, (60 - i*8) * 3);  // Увеличено в 3 раза
+        p.setDepth(5);  // Планеты под солнцем
         planets.push(p);
     }
     
@@ -1296,7 +1373,8 @@ function showSpaceScene() {
             .setDisplaySize(2000, 2000);
         
         this.time.delayedCall(6000, () => {
-            SFX.evilMelody();
+            // Мелодия "Торжество зла" (процедурный синтез)
+            playSFX(this, 'evil_triumph');
             
             // ЧЁРНАЯ ДЫРА (из texture final_blackhole) - в 2 раза больше
             const bh = this.add.image(config.width * 5, config.height/2, 'final_blackhole')
@@ -1310,19 +1388,27 @@ function showSpaceScene() {
                 ease: 'Power2'
             });
             
-            // НАДПИСЬ (уменьшена для мобильных)
+            // НАДПИСЬ (увеличена в 4 раза, две строки, ниже чёрной дыры)
             this.time.delayedCall(5500, () => {
-                const finText = this.add.text(config.width/2, config.height/2 + 400, 
-                    'ПРОДОЛЖЕНИЕ СЛЕДУЕТ...', {
-                    fontSize: '48px',
+                const finText = this.add.text(config.width/2, config.height/2 + 800, 
+                    'ПРОДОЛЖЕНИЕ\nСЛЕДУЕТ...', {
+                    fontSize: '192px',
                     fill: '#ffffff',
                     fontWeight: 'bold',
                     stroke: '#ff00ff',
-                    strokeThickness: 6
+                    strokeThickness: 12
                 }).setOrigin(0.5).setDepth(102);
                 
-                this.time.delayedCall(6000, () => {
+                this.time.delayedCall(1000, () => {
                     sendScoreAndClose();
+                    
+                    // ОЧИСТКА: останавливаем всё после отправки счёта
+                    this.time.delayedCall(500, () => {
+                        this.tweens.killAll();
+                        this.time.removeAllEvents();
+                        //this.cameras.main.stopZoom() // не существует в Phaser 3;
+                        if(player && player.active) player.destroy();
+                    });
                 });
             });
         });
@@ -1353,18 +1439,26 @@ function sendScoreAndClose() {
 function update() {
     if(gameState !== "playing") return;
     
+    // Фоновые облака: базовая скорость растёт с уровнем, у каждого облака свой рандом
+    const baseSpeed = 2 * Math.pow(1.1, level - 1);
     bgClouds.children.iterate(c => {
         if(c) {
-            c.y += 2;
+            // У каждого облака своя скорость: 0.8 - 1.2 от базовой
+            // Используем уникальное свойство cloudSpeed для постоянного рандома
+            if(!c.cloudSpeed) {
+                c.cloudSpeed = baseSpeed * Phaser.Math.FloatBetween(0.8, 1.2);
+            }
+            c.y += c.cloudSpeed;
             if(c.y > config.height) {
                 c.y = -50;
                 c.x = Phaser.Math.Between(0, config.width);
+                c.cloudSpeed = baseSpeed * Phaser.Math.FloatBetween(0.8, 1.2);
             }
         }
     });
     
     bullets.children.iterate(b => {
-        if(b && b.y < -20) b.destroy();
+        if(b && b.y < -100) b.destroy();  // Увеличил запас чтобы пуля долетала до босса
     });
     
     clouds.children.iterate(e => {
@@ -1391,8 +1485,8 @@ const LEVEL_CONFIG = {
     1: { name: "Голубое небо", enemy: "cloud1", enemyHp: 1, speed: 200, color: "#4ea1d3" },
     2: { name: "Грозовой фронт", enemy: "cloud2", enemyHp: 2, speed: 250, color: "#2c5f7f" },
     3: { name: "Закат", enemy: "cloud3", enemyHp: 3, speed: 300, color: "#ff6b35" },
-    4: { name: "Стратосфера", enemy: "crystal", enemyHp: 6, speed: 400, color: "#1a1a2e" },
-    5: { name: "Орбита", enemy: "debris", enemyHp: 8, speed: 500, color: "#0b0b0b" }
+    4: { name: "Стратосфера", enemy: "crystal", enemyHp: 6, speed: 400, color: "#3a3a5e" },
+    5: { name: "Орбита", enemy: "debris", enemyHp: 8, speed: 500, color: "#1a1a1a" }
 };
 
 // Функция для получения HP врага с учётом уровня
@@ -1439,6 +1533,87 @@ function showBossText(scene, bossNum) {
     const name = texts[bossNum] || 'Босс ' + bossNum;
     // Длительность 2 секунды (в 2 раза дольше)
     showAnimatedText(scene, 'БОСС:\n' + name, 0xff00ff, 2000);
+}
+
+// Функция показа накопленного урона
+function showDamageText(x, y, damage) {
+    // Инициализируем pendingDamage если нет
+    if(!this.pendingDamage) this.pendingDamage = {};
+    
+    // Создаём или обновляем накопитель урона
+    const key = 'dmg_' + Math.round(x) + '_' + Math.round(y);
+    
+    if(this.pendingDamage[key]) {
+        // Уже есть накопитель - добавляем урон
+        this.pendingDamage[key].damage += damage;
+        this.pendingDamage[key].timer = 0.15;  // Сброс таймера
+    } else {
+        // Новый накопитель
+        this.pendingDamage[key] = {
+            damage: damage,
+            timer: 0.15,
+            x: x,
+            y: y
+        };
+        
+        // Создаём текст
+        const dmgText = this.add.text(x, y, '-' + damage, {
+            fontSize: '24px',
+            fontWeight: 'bold',
+            color: '#ff0000',
+            stroke: '#ffffff',
+            strokeThickness: 3
+        }).setOrigin(0.5);
+        this.pendingDamage[key].text = dmgText;
+        
+        // Запускаем обновление
+        this.time.addEvent({
+            delay: 50,
+            callback: updateDamageTextKey,
+            callbackScope: this,
+            args: [key],
+            repeat: 10
+        });
+    }
+}
+
+// Обновление текста урона (для накопленного урона)
+function updateDamageTextKey(key) {
+    if(!this.pendingDamage) this.pendingDamage = {};
+    if(!this.pendingDamage[key]) return;
+    
+    const data = this.pendingDamage[key];
+    data.timer -= 0.05;
+    
+    // Обновляем текст
+    if(data.text && data.text.active) {
+        data.text.setText('-' + data.damage);
+        data.text.y -= 1;  // Медленно плывёт вверх
+    }
+    
+    // Время вышло - уничтожаем
+    if(data.timer <= 0) {
+        if(data.text) {
+            // Финальная анимация исчезновения
+            this.tweens.add({
+                targets: data.text,
+                alpha: 0,
+                y: data.text.y - 20,
+                duration: 200,
+                onComplete: () => {
+                    if(data.text) data.text.destroy();
+                }
+            });
+        }
+        delete this.pendingDamage[key];
+        return true;  // Остановить повторения
+    }
+    return false;  // Продолжить повторения
+}
+
+// Функция показа урона боссу
+function showBossDamageText(bossObj) {
+    showDamageText.call(this, bossObj.x + 30, bossObj.y - 30, playerDamage);
 }
 
 // Функция показа анимированной надписи
