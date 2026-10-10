@@ -1,18 +1,1135 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sunny Strike</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        body { margin: 0; padding: 0; overflow: hidden; background: #000; touch-action: none; }
-        canvas { display: block; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Солнышко против Туч</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0d1b2a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
 </head>
 <body>
-    <div id="game-container"></div>
-    <script src="game.js"></script>
+<canvas id="gameCanvas"></canvas>
+
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  let W = window.innerWidth;
+  let H = window.innerHeight;
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- ЗВУКОВОЙ ДВИЖОК (Web Audio API) ---
+  let audioCtx = null;
+  function initAudio() {
+    if (!audioCtx) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (AudioContext) audioCtx = new AudioContext();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playTone(freq, type, duration, vol = 0.15, slideTo = null) {
+    if (!audioCtx) return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) {
+        osc.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + duration);
+      }
+      gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch (e) {}
+  }
+
+  function soundShoot() { playTone(680, 'sine', 0.08, 0.08, 220); }
+  function soundHit() { playTone(240, 'triangle', 0.06, 0.12, 100); }
+  function soundExplode() { playTone(120, 'sawtooth', 0.25, 0.2, 40); }
+  function soundBonus() {
+    playTone(523.25, 'sine', 0.12, 0.15, 659.25);
+    setTimeout(() => playTone(783.99, 'sine', 0.18, 0.15, 1046.5), 100);
+  }
+  function soundFlash() {
+    playTone(200, 'sawtooth', 0.5, 0.3, 800);
+  }
+
+  // Звук победы над боссом уровня (быстрое мажорное арпеджио)
+  function soundLevelWin() {
+    const notes = [392, 523.25, 659.25, 783.99, 1046.5]; // G4, C5, E5, G5, C6
+    notes.forEach((freq, idx) => {
+      setTimeout(() => playTone(freq, 'triangle', 0.22, 0.22), idx * 85);
+    });
+  }
+
+  // Финальные триумфальные фанфары (8 нот с плотным финалом)
+  function soundFinalFanfare() {
+    const melody = [
+      { f: 523.25, d: 0.16, t: 0 },    // C5
+      { f: 523.25, d: 0.16, t: 160 },  // C5
+      { f: 523.25, d: 0.16, t: 320 },  // C5
+      { f: 659.25, d: 0.35, t: 480 },  // E5
+      { f: 587.33, d: 0.20, t: 800 },  // D5
+      { f: 659.25, d: 0.25, t: 1000 }, // E5
+      { f: 783.99, d: 0.65, t: 1250 }, // G5
+      { f: 1046.5, d: 1.20, t: 1850 }  // C6 (финал)
+    ];
+    melody.forEach(n => {
+      setTimeout(() => {
+        playTone(n.f, 'triangle', n.d, 0.28);
+        playTone(n.f * 1.5, 'sine', n.d, 0.15); // гармоника
+      }, n.t);
+    });
+  }
+
+  // --- ЦВЕТОВАЯ ПАЛИТРА УРОВНЕЙ (Градиенты) ---
+  const LEVEL_THEMES = [
+    { top: [18, 55, 95], bot: [35, 90, 145] },    // Ур 1: Дневной лазурный
+    { top: [42, 20, 68], bot: [88, 38, 122] },    // Ур 2: Грозовой фиолетовый
+    { top: [12, 52, 68], bot: [24, 108, 124] },   // Ур 3: Ледяной циклон (бирюза)
+    { top: [68, 24, 20], bot: [142, 60, 35] },    // Ур 4: Багрово-закатный шторм
+    { top: [8, 12, 28],  bot: [24, 28, 64] }       // Ур 5: Чернильный космос
+  ];
+
+  let currentTop = [...LEVEL_THEMES[0].top];
+  let currentBot = [...LEVEL_THEMES[0].bot];
+
+  // --- ИГРОВОЕ СОСТОЯНИЕ ---
+  let score = 0;
+  let level = 1;
+  const maxLevels = 5;
+  let lives = 4;
+  const maxLives = 4;
+  let combo = 0;
+  let comboTimer = 0;
+  let bulletDamage = 1;
+  let multiShot = 1;
+  let flashCharge = 100;
+  let hasShield = false;
+  let isInvulnerable = 0;
+
+  let killedNormalInLevel = 0;
+  const KILLS_PER_LEVEL = 12;
+  let bossSpawned = false;
+  let currentBoss = null;
+
+  // Плавный гипер-переход между уровнями (без паузы)
+  let isTransitioning = false;
+  let transitionTimer = 0;
+  const TRANSITION_DURATION = 3.2; // секунды
+
+  // Финал игры
+  let isGameWon = false;
+  let isGameOver = false;
+  let winTimer = 0;
+
+  // Игрок
+  const player = {
+    x: W * 0.5,
+    y: H * 0.8,
+    r: 26,
+    targetX: W * 0.5,
+    targetY: H * 0.8,
+    rot: 0,
+    victoryScale: 1.0
+  };
+
+  let bullets = [];
+  let enemies = [];
+  let enemyBullets = [];
+  let bonuses = [];
+  let particles = [];
+  let confetti = [];
+  let screenFlash = 0;
+  let lastShotTime = 0;
+  let lastSpawnEnemy = 0;
+  let lastBonusTime = 0;
+
+  // --- 3 ДИНАМИЧЕСКИХ СЛОЯ КУЧЕВЫХ ОБЛАКОВ ---
+  // Каждый слой: набор кучевых "шапок", плавно плывущих вниз
+  const cloudLayers = [
+    { baseSpeed: 0.45, alpha: 0.12, clouds: [] }, // 1. Дальний (огромные, медленные)
+    { baseSpeed: 0.95, alpha: 0.20, clouds: [] }, // 2. Средний
+    { baseSpeed: 1.70, alpha: 0.32, clouds: [] }  // 3. Ближний (быстрые)
+  ];
+
+  cloudLayers.forEach((layer, idx) => {
+    const count = 5 + idx * 2;
+    for (let i = 0; i < count; i++) {
+      layer.clouds.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: (50 + Math.random() * 60) * (1 - idx * 0.2),
+        speedMult: 0.8 + Math.random() * 0.4
+      });
+    }
+  });
+
+  // Кнопка вспышки
+  function getFlashBtnRect() {
+    const bw = 140;
+    const bh = 44;
+    return { x: W - bw - 16, y: H * 0.72, w: bw, h: bh };
+  }
+
+  function triggerFlash() {
+    if (flashCharge >= 100 && !isGameOver && !isGameWon) {
+      initAudio();
+      soundFlash();
+      flashCharge = 0;
+      enemyBullets = [];
+      enemies.forEach(en => {
+        en.hp -= 4;
+        createExplosion(en.x, en.y, '#ffffff', 12);
+      });
+      if (currentBoss) {
+        currentBoss.hp -= 6;
+        createExplosion(currentBoss.x, currentBoss.y, '#ffd700', 16);
+      }
+      screenFlash = 0.85;
+    }
+  }
+
+  // --- УПРАВЛЕНИЕ (НЕ ВЛИЯЕТ НА СКОРОСТЬ КАДРОВ) ---
+  let isPointerDown = false;
+  function handleInput(clientX, clientY, isTap) {
+    initAudio();
+
+    if (isGameWon && winTimer > 1.8) {
+      // Закрытие и передача боту
+      if (window.Telegram && window.Telegram.WebApp) {
+        try {
+          window.Telegram.WebApp.sendData(JSON.stringify({ score, level: 5, event: 'game_win' }));
+          window.Telegram.WebApp.close();
+        } catch (e) {
+          window.Telegram.WebApp.close();
+        }
+      }
+      return;
+    }
+
+    if (isGameOver) {
+      // Рестарт
+      restartGame();
+      return;
+    }
+
+    const btn = getFlashBtnRect();
+    if (isTap && clientX >= btn.x && clientX <= btn.x + btn.w &&
+        clientY >= btn.y && clientY <= btn.y + btn.h) {
+      triggerFlash();
+      return;
+    }
+
+    player.targetX = Math.max(player.r, Math.min(W - player.r, clientX));
+    player.targetY = Math.max(player.r, Math.min(H - player.r, clientY));
+  }
+
+  window.addEventListener('mousedown', e => { isPointerDown = true; handleInput(e.clientX, e.clientY, true); });
+  window.addEventListener('mousemove', e => { if (isPointerDown) handleInput(e.clientX, e.clientY, false); });
+  window.addEventListener('mouseup', () => { isPointerDown = false; });
+
+  window.addEventListener('touchstart', e => {
+    isPointerDown = true;
+    const t = e.touches[0];
+    handleInput(t.clientX, t.clientY, true);
+  }, { passive: false });
+
+  window.addEventListener('touchmove', e => {
+    if (isPointerDown) {
+      const t = e.touches[0];
+      handleInput(t.clientX, t.clientY, false);
+    }
+  }, { passive: false });
+
+  window.addEventListener('touchend', () => { isPointerDown = false; });
+
+  function restartGame() {
+    score = 0;
+    level = 1;
+    lives = 4;
+    combo = 0;
+    bulletDamage = 1;
+    multiShot = 1;
+    flashCharge = 100;
+    hasShield = false;
+    isInvulnerable = 0;
+    killedNormalInLevel = 0;
+    bossSpawned = false;
+    currentBoss = null;
+    isTransitioning = false;
+    isGameWon = false;
+    isGameOver = false;
+    bullets = [];
+    enemies = [];
+    enemyBullets = [];
+    bonuses = [];
+    particles = [];
+    confetti = [];
+    player.targetX = player.x = W * 0.5;
+    player.targetY = player.y = H * 0.8;
+  }
+
+  // --- ЧЕРТЕЖИ БОНУСОВ И СИМВОЛОВ ---
+  function drawStar(cx, cy, spikes, outerRadius, innerRadius, color) {
+    let rot = Math.PI / 2 * 3;
+    let x = cx, y = cy;
+    let step = Math.PI / spikes;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - outerRadius);
+    for (let i = 0; i < spikes; i++) {
+      x = cx + Math.cos(rot) * outerRadius;
+      y = cy + Math.sin(rot) * outerRadius;
+      ctx.lineTo(x, y);
+      rot += step;
+      x = cx + Math.cos(rot) * innerRadius;
+      y = cy + Math.sin(rot) * innerRadius;
+      ctx.lineTo(x, y);
+      rot += step;
+    }
+    ctx.lineTo(cx, cy - outerRadius);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  function drawHeart(x, y, size, color) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    const h = size * 0.35;
+    ctx.moveTo(0, h);
+    ctx.bezierCurveTo(0, 0, -size / 2, 0, -size / 2, h);
+    ctx.bezierCurveTo(-size / 2, (size + h) / 2, 0, size, 0, size);
+    ctx.bezierCurveTo(0, size, size / 2, (size + h) / 2, size / 2, h);
+    ctx.bezierCurveTo(size / 2, 0, 0, 0, 0, h);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Солнышко
+  function drawSun(x, y, r, rot, scale = 1.0) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    ctx.rotate(rot);
+
+    // Золотые лучи
+    ctx.fillStyle = '#ffb703';
+    const rays = 10;
+    for (let i = 0; i < rays; i++) {
+      ctx.rotate((Math.PI * 2) / rays);
+      ctx.beginPath();
+      ctx.arc(0, r * 1.05, r * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Тело солнышка
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffc300';
+    ctx.fill();
+
+    // Лицо
+    ctx.rotate(-rot);
+    ctx.fillStyle = '#222222';
+    ctx.beginPath();
+    ctx.arc(-r * 0.35, -r * 0.1, 3.2, 0, Math.PI * 2);
+    ctx.arc(r * 0.35, -r * 0.1, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Улыбка
+    ctx.beginPath();
+    ctx.arc(0, r * 0.12, r * 0.44, 0.15 * Math.PI, 0.85 * Math.PI, false);
+    ctx.lineWidth = 2.6;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#222222';
+    ctx.stroke();
+
+    // Защитный барьер
+    if (hasShield) {
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.85)';
+      ctx.lineWidth = 3.5;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  // Частицы взрыва
+  function createExplosion(x, y, color, count = 8) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 1.2 + Math.random() * 3.8;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        life: 1.0,
+        decay: 0.035 + Math.random() * 0.03,
+        r: 2 + Math.random() * 2.5,
+        color
+      });
+    }
+  }
+
+  // Спавн конфетти для финала
+  function spawnConfetti() {
+    const colors = ['#f59e0b', '#ec4899', '#3b82f6', '#10b981', '#fbbf24', '#a855f7'];
+    for (let i = 0; i < 5; i++) {
+      confetti.push({
+        x: Math.random() * W,
+        y: -15,
+        vx: -1.5 + Math.random() * 3,
+        vy: 2 + Math.random() * 3.5,
+        rot: Math.random() * Math.PI * 2,
+        vRot: -0.08 + Math.random() * 0.16,
+        w: 8 + Math.random() * 6,
+        h: 12 + Math.random() * 6,
+        color: colors[Math.floor(Math.random() * colors.length)]
+      });
+    }
+  }
+
+  // --- СПАВН БОССОВ (Уникальные для каждого уровня 1-5) ---
+  function spawnBossForLevel(lvl) {
+    bossSpawned = true;
+    let bData = {
+      x: W * 0.5,
+      y: -60,
+      targetY: H * 0.22,
+      hp: 15 + lvl * 10,
+      maxHp: 15 + lvl * 10,
+      level: lvl,
+      shootTimer: 0,
+      animTime: 0,
+      movePhase: 0
+    };
+
+    if (lvl === 1) { // Грозовая Туча
+      bData.r = 44;
+      bData.name = 'Грозовая Туча';
+    } else if (lvl === 2) { // Град-Титан
+      bData.r = 48;
+      bData.name = 'Град-Титан';
+    } else if (lvl === 3) { // Циклон
+      bData.r = 46;
+      bData.name = 'Циклон-Вихрь';
+    } else if (lvl === 4) { // Шаровая Молния
+      bData.r = 42;
+      bData.name = 'Шаровая Молния';
+    } else { // Стратосферный Шторм (Финальный)
+      bData.r = 54;
+      bData.name = 'Стратосферный Шторм';
+    }
+
+    currentBoss = bData;
+    playTone(200, 'sawtooth', 0.6, 0.25, 400); // сирена босса
+  }
+
+  // Запуск перехода на следующий уровень
+  function startLevelTransition() {
+    isTransitioning = true;
+    transitionTimer = 0;
+    soundLevelWin();
+  }
+
+  // --- ГЛАВНЫЙ ИГРОВОЙ ЦИКЛ (Fixed Timestep 60 FPS) ---
+  let lastTimestamp = performance.now();
+  let accumulator = 0;
+  const FIXED_DT = 1 / 60; // 0.01666 сек
+
+  function updateLogic(dt) {
+    if (isGameWon) {
+      winTimer += dt;
+      spawnConfetti();
+      // Анимация победного солнышка
+      player.x += (W * 0.5 - player.x) * 0.08;
+      player.y += (H * 0.38 - player.y) * 0.08;
+      player.rot += 0.03;
+      player.victoryScale = Math.min(1.8, player.victoryScale + dt * 0.35);
+
+      // Обновление конфетти
+      for (let i = confetti.length - 1; i >= 0; i--) {
+        const c = confetti[i];
+        c.x += c.vx;
+        c.y += c.vy;
+        c.rot += c.vRot;
+        if (c.y > H + 20) confetti.splice(i, 1);
+      }
+      return;
+    }
+
+    if (isGameOver) return;
+
+    // Плавное следование за пальцем
+    player.x += (player.targetX - player.x) * 0.25;
+    player.y += (player.targetY - player.y) * 0.25;
+    player.rot += 0.02;
+
+    if (isInvulnerable > 0) isInvulnerable -= dt;
+    if (flashCharge < 100) flashCharge = Math.min(100, flashCharge + dt * 10);
+    if (comboTimer > 0) {
+      comboTimer -= dt;
+      if (comboTimer <= 0) combo = 0;
+    }
+
+    // --- ПЛАВНЫЙ ГИПЕР-ПЕРЕХОД МЕЖДУ УРОВНЯМИ ---
+    let cloudSpeedMultiplier = 1.0;
+    if (isTransitioning) {
+      transitionTimer += dt;
+      const progress = transitionTimer / TRANSITION_DURATION;
+      // Синусоидальный разгон и замедление облаков
+      cloudSpeedMultiplier = 1.0 + Math.sin(progress * Math.PI) * 5.5;
+
+      // Плавная интерполяция цвета фона к новому уровню
+      const targetTheme = LEVEL_THEMES[Math.min(maxLevels - 1, level)];
+      for (let i = 0; i < 3; i++) {
+        currentTop[i] += (targetTheme.top[i] - currentTop[i]) * 0.04;
+        currentBot[i] += (targetTheme.bot[i] - currentBot[i]) * 0.04;
+      }
+
+      if (transitionTimer >= TRANSITION_DURATION) {
+        isTransitioning = false;
+        level++;
+        killedNormalInLevel = 0;
+        bossSpawned = false;
+        currentBoss = null;
+      }
+    }
+
+    // Движение облаков фона (3 слоя)
+    cloudLayers.forEach((layer) => {
+      const spd = layer.baseSpeed * cloudSpeedMultiplier;
+      layer.clouds.forEach(c => {
+        c.y += spd * c.speedMult;
+        if (c.y > H + c.r) {
+          c.y = -c.r;
+          c.x = Math.random() * W;
+        }
+      });
+    });
+
+    // --- СТРЕЛЬБА ИГРОКА (комфортный темп: 320 мс) ---
+    const nowMs = performance.now();
+    if (!isTransitioning && nowMs - lastShotTime > 320) {
+      lastShotTime = nowMs;
+      soundShoot();
+      if (multiShot === 1) {
+        bullets.push({ x: player.x, y: player.y - player.r, vx: 0, vy: -12 });
+      } else if (multiShot === 2) {
+        bullets.push({ x: player.x - 11, y: player.y - player.r, vx: -1.2, vy: -12 });
+        bullets.push({ x: player.x + 11, y: player.y - player.r, vx: 1.2, vy: -12 });
+      } else {
+        bullets.push({ x: player.x, y: player.y - player.r, vx: 0, vy: -12 });
+        bullets.push({ x: player.x - 14, y: player.y - player.r, vx: -2.2, vy: -11.5 });
+        bullets.push({ x: player.x + 14, y: player.y - player.r, vx: 2.2, vy: -11.5 });
+      }
+    }
+
+    // Спавн обычных врагов (4 разных типа)
+    if (!bossSpawned && !isTransitioning && nowMs - lastSpawnEnemy > 1450) {
+      lastSpawnEnemy = nowMs;
+      const types = ['puffy', 'rain', 'spark', 'tornado'];
+      const enemyType = types[Math.floor(Math.random() * types.length)];
+      enemies.push({
+        type: enemyType,
+        x: 40 + Math.random() * (W - 80),
+        y: -35,
+        startX: 40 + Math.random() * (W - 80),
+        hp: enemyType === 'puffy' ? 2 : (enemyType === 'tornado' ? 3 : 4),
+        r: enemyType === 'puffy' ? 22 : (enemyType === 'tornado' ? 24 : 26),
+        vy: enemyType === 'puffy' ? 1.9 : (enemyType === 'tornado' ? 1.6 : 1.3),
+        animTime: Math.random() * 10,
+        shootTime: nowMs + 700 + Math.random() * 800
+      });
+    }
+
+    // Проверка появления босса
+    if (!bossSpawned && !isTransitioning && killedNormalInLevel >= KILLS_PER_LEVEL && enemies.length === 0) {
+      spawnBossForLevel(level);
+    }
+
+    // Спавн бонусов
+    if (!isTransitioning && nowMs - lastBonusTime > 8000) {
+      lastBonusTime = nowMs;
+      const bTypes = ['multi', 'damage', 'heart', 'shield'];
+      bonuses.push({
+        x: 40 + Math.random() * (W - 80),
+        y: -20,
+        vy: 1.5,
+        r: 17,
+        type: bTypes[Math.floor(Math.random() * bTypes.length)]
+      });
+    }
+
+    // Движение пуль игрока
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      const b = bullets[i];
+      b.x += b.vx;
+      b.y += b.vy;
+      if (b.y < -20 || b.x < 0 || b.x > W) bullets.splice(i, 1);
+    }
+
+    // Движение вражеских пуль
+    for (let i = enemyBullets.length - 1; i >= 0; i--) {
+      const eb = enemyBullets[i];
+      eb.x += eb.vx;
+      eb.y += eb.vy;
+
+      // Попадание в игрока
+      if (Math.hypot(eb.x - player.x, eb.y - player.y) < player.r + eb.r) {
+        enemyBullets.splice(i, 1);
+        if (isInvulnerable <= 0) {
+          if (hasShield) {
+            hasShield = false;
+            soundHit();
+            createExplosion(player.x, player.y, '#00e5ff', 12);
+          } else {
+            lives--;
+            soundHit();
+            isInvulnerable = 1.2;
+            createExplosion(player.x, player.y, '#ff4444', 10);
+            if (lives <= 0) {
+              isGameOver = true;
+              soundExplode();
+            }
+          }
+        }
+        continue;
+      }
+      if (eb.y > H + 20) enemyBullets.splice(i, 1);
+    }
+
+    // Обновление рядовых врагов
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const en = enemies[i];
+      en.animTime += dt;
+      en.y += en.vy;
+
+      // Траектории движения
+      if (en.type === 'puffy') {
+        en.x = en.startX + Math.sin(en.animTime * 3) * 35;
+      } else if (en.type === 'tornado') {
+        en.x += (player.x - en.x) * 0.015;
+      }
+
+      // Стрельба врагов
+      if (nowMs > en.shootTime) {
+        en.shootTime = nowMs + 1800 + Math.random() * 800;
+        if (en.type === 'rain') {
+          enemyBullets.push({ x: en.x, y: en.y + en.r, vx: 0, vy: 3.9, r: 4, color: '#7dd3fc' });
+        } else if (en.type === 'spark') {
+          enemyBullets.push({ x: en.x, y: en.y + en.r, vx: -1.4, vy: 3.5, r: 4, color: '#fde047' });
+          enemyBullets.push({ x: en.x, y: en.y + en.r, vx: 1.4, vy: 3.5, r: 4, color: '#fde047' });
+        }
+      }
+
+      // Столкновение с солнышком
+      if (isInvulnerable <= 0 && Math.hypot(en.x - player.x, en.y - player.y) < player.r + en.r) {
+        if (hasShield) {
+          hasShield = false;
+          soundHit();
+          createExplosion(player.x, player.y, '#00e5ff', 12);
+        } else {
+          lives--;
+          soundHit();
+          isInvulnerable = 1.2;
+          createExplosion(player.x, player.y, '#ff4444', 10);
+          if (lives <= 0) {
+            isGameOver = true;
+            soundExplode();
+          }
+        }
+      }
+
+      // Попадание пуль игрока
+      for (let j = bullets.length - 1; j >= 0; j--) {
+        const b = bullets[j];
+        if (Math.hypot(b.x - en.x, b.y - en.y) < en.r + 5) {
+          bullets.splice(j, 1);
+          en.hp -= bulletDamage;
+          soundHit();
+          createExplosion(b.x, b.y, '#ffffff', 3);
+          if (en.hp <= 0) break;
+        }
+      }
+
+      // Гибель обычного врага
+      if (en.hp <= 0) {
+        soundExplode();
+        createExplosion(en.x, en.y, '#93c5fd', 12);
+        score += 80;
+        combo++;
+        comboTimer = 2.5;
+        killedNormalInLevel++;
+        enemies.splice(i, 1);
+        continue;
+      }
+
+      if (en.y > H + 50) enemies.splice(i, 1);
+    }
+
+    // --- ОБНОВЛЕНИЕ БОССА ---
+    if (currentBoss) {
+      const b = currentBoss;
+      b.animTime += dt;
+      b.shootTimer += dt;
+
+      // Плавный спуск босса на экран
+      if (b.y < b.targetY) {
+        b.y += (b.targetY - b.y) * 0.05;
+      } else {
+        // Уникальный маневр для каждого босса
+        b.movePhase += dt * (b.level === 3 ? 2.5 : 1.2);
+        b.x = W * 0.5 + Math.sin(b.movePhase) * (W * 0.35);
+      }
+
+      // Атаки босса
+      if (b.y >= b.targetY - 10) {
+        if (b.level === 1 && b.shootTimer > 1.4) {
+          b.shootTimer = 0;
+          enemyBullets.push({ x: b.x - 14, y: b.y + b.r, vx: -0.8, vy: 4.0, r: 5, color: '#67e8f9' });
+          enemyBullets.push({ x: b.x + 14, y: b.y + b.r, vx: 0.8, vy: 4.0, r: 5, color: '#67e8f9' });
+        } else if (b.level === 2 && b.shootTimer > 1.5) {
+          b.shootTimer = 0;
+          for (let k = -2; k <= 2; k++) {
+            enemyBullets.push({ x: b.x, y: b.y + b.r, vx: k * 1.2, vy: 3.8, r: 5, color: '#bae6fd' });
+          }
+        } else if (b.level === 3 && b.shootTimer > 0.8) {
+          b.shootTimer = 0;
+          const a = b.animTime * 4;
+          enemyBullets.push({ x: b.x, y: b.y, vx: Math.cos(a) * 3.5, vy: Math.sin(a) * 3.5 + 1, r: 4, color: '#2dd4bf' });
+        } else if (b.level === 4 && b.shootTimer > 1.3) {
+          b.shootTimer = 0;
+          for (let k = 0; k < 6; k++) {
+            const ang = (Math.PI * 2 / 6) * k + b.animTime;
+            enemyBullets.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 3.2, vy: Math.sin(ang) * 3.2, r: 4, color: '#facc15' });
+          }
+        } else if (b.level === 5 && b.shootTimer > 1.1) {
+          b.shootTimer = 0;
+          for (let k = -2; k <= 2; k++) {
+            enemyBullets.push({ x: b.x + k * 12, y: b.y + b.r, vx: k * 0.9, vy: 4.2, r: 5, color: '#f43f5e' });
+          }
+        }
+      }
+
+      // Попадание пуль игрока в босса
+      for (let j = bullets.length - 1; j >= 0; j--) {
+        const bl = bullets[j];
+        if (Math.hypot(bl.x - b.x, bl.y - b.y) < b.r + 6) {
+          bullets.splice(j, 1);
+          b.hp -= bulletDamage;
+          soundHit();
+          createExplosion(bl.x, bl.y, '#ffffff', 4);
+          if (b.hp <= 0) break;
+        }
+      }
+
+      // Победа над боссом
+      if (b.hp <= 0) {
+        soundExplode();
+        createExplosion(b.x, b.y, '#ffd700', 30);
+        score += 500 * b.level;
+        currentBoss = null;
+
+        if (level >= maxLevels) {
+          // Финальная победа
+          isGameWon = true;
+          winTimer = 0;
+          soundFinalFanfare();
+        } else {
+          // Плавный бесшовный переход на следующий уровень
+          startLevelTransition();
+        }
+      }
+    }
+
+    // Обновление бонусов
+    for (let i = bonuses.length - 1; i >= 0; i--) {
+      const bn = bonuses[i];
+      bn.y += bn.vy;
+      if (Math.hypot(bn.x - player.x, bn.y - player.y) < player.r + bn.r) {
+        soundBonus();
+        if (bn.type === 'multi') multiShot = Math.min(3, multiShot + 1);
+        if (bn.type === 'damage') bulletDamage = Math.min(3, bulletDamage + 1);
+        if (bn.type === 'heart') lives = Math.min(maxLives, lives + 1);
+        if (bn.type === 'shield') hasShield = true;
+
+        createExplosion(bn.x, bn.y, '#ffffff', 14);
+        bonuses.splice(i, 1);
+        continue;
+      }
+      if (bn.y > H + 30) bonuses.splice(i, 1);
+    }
+
+    // Частицы
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  // --- ОТРИСОВКА ВРАГОВ И БОССОВ ---
+  function renderEnemy(en) {
+    ctx.save();
+    ctx.translate(en.x, en.y);
+
+    if (en.type === 'puffy') { // Белое перистое облачко
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.arc(0, 0, en.r * 0.7, 0, Math.PI * 2);
+      ctx.arc(-en.r * 0.45, 2, en.r * 0.5, 0, Math.PI * 2);
+      ctx.arc(en.r * 0.45, 2, en.r * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (en.type === 'rain') { // Серая дождевая туча
+      ctx.fillStyle = '#64748b';
+      ctx.beginPath();
+      ctx.arc(0, -2, en.r * 0.75, 0, Math.PI * 2);
+      ctx.arc(-en.r * 0.45, 3, en.r * 0.55, 0, Math.PI * 2);
+      ctx.arc(en.r * 0.45, 3, en.r * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (en.type === 'spark') { // Электро-сгусток
+      ctx.fillStyle = '#7c3aed';
+      ctx.beginPath();
+      ctx.arc(0, 0, en.r * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      drawStar(0, 0, 6, en.r * 0.75, en.r * 0.4, '#facc15');
+    } else if (en.type === 'tornado') { // Вихрь/смерч
+      ctx.fillStyle = '#94a3b8';
+      ctx.beginPath();
+      ctx.ellipse(0, -en.r * 0.3, en.r * 0.8, en.r * 0.35, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, en.r * 0.6, en.r * 0.28, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, en.r * 0.35, en.r * 0.4, en.r * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Глаза врага
+    ctx.fillStyle = en.type === 'spark' ? '#fde047' : '#1e293b';
+    ctx.beginPath();
+    ctx.arc(-en.r * 0.3, -1, 2.8, 0, Math.PI * 2);
+    ctx.arc(en.r * 0.3, -1, 2.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function renderBoss(b) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+
+    if (b.level === 1) { // Грозовая туча
+      ctx.fillStyle = '#334155';
+      ctx.beginPath();
+      ctx.arc(0, 0, b.r * 0.85, 0, Math.PI * 2);
+      ctx.arc(-b.r * 0.55, 3, b.r * 0.6, 0, Math.PI * 2);
+      ctx.arc(b.r * 0.55, 3, b.r * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      // Молнии по бокам
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-b.r * 0.8, 10); ctx.lineTo(-b.r * 0.6, 25); ctx.lineTo(-b.r * 0.7, 35);
+      ctx.moveTo(b.r * 0.8, 10); ctx.lineTo(b.r * 0.6, 25); ctx.lineTo(b.r * 0.7, 35);
+      ctx.stroke();
+    } else if (b.level === 2) { // Град-Титан (ледяной многогранник)
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const ang = (Math.PI * 2 / 8) * i + b.animTime * 0.5;
+        const rad = i % 2 === 0 ? b.r : b.r * 0.75;
+        const px = Math.cos(ang) * rad;
+        const py = Math.sin(ang) * rad;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else if (b.level === 3) { // Циклон-Вихрь (лопасти)
+      ctx.fillStyle = '#0d9488';
+      for (let i = 0; i < 4; i++) {
+        const ang = (Math.PI * 2 / 4) * i + b.animTime * 3;
+        ctx.beginPath();
+        ctx.arc(Math.cos(ang) * b.r * 0.55, Math.sin(ang) * b.r * 0.55, b.r * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(0, 0, b.r * 0.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#14b8a6';
+      ctx.fill();
+    } else if (b.level === 4) { // Шаровая Молния (плазма)
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.arc(0, 0, b.r * 0.85, 0, Math.PI * 2);
+      ctx.fill();
+      drawStar(0, 0, 8, b.r * 1.1, b.r * 0.7, '#fef08a');
+    } else { // Стратосферный Шторм (двуглазый флагман)
+      ctx.fillStyle = '#1e1b4b';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, b.r * 1.1, b.r * 0.75, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+
+    // Красные светящиеся глаза
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(-b.r * 0.35, -2, 4, 0, Math.PI * 2);
+    ctx.arc(b.r * 0.35, -2, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Полоска здоровья босса
+    const barW = b.r * 2.2;
+    const barH = 7;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(-barW / 2, -b.r - 14, barW, barH);
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(-barW / 2, -b.r - 14, barW * Math.max(0, b.hp / b.maxHp), barH);
+
+    ctx.restore();
+  }
+
+  // --- ОТРИСОВКА КАДРА ---
+  function render() {
+    // Градиент неба уровня
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, `rgb(${Math.round(currentTop[0])}, ${Math.round(currentTop[1])}, ${Math.round(currentTop[2])})`);
+    grad.addColorStop(1, `rgb(${Math.round(currentBot[0])}, ${Math.round(currentBot[1])}, ${Math.round(currentBot[2])})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // 3 динамических слоя кучевых облаков
+    cloudLayers.forEach(layer => {
+      ctx.fillStyle = `rgba(255, 255, 255, ${layer.alpha})`;
+      layer.clouds.forEach(c => {
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+        ctx.arc(c.x + c.r * 0.55, c.y + 4, c.r * 0.75, 0, Math.PI * 2);
+        ctx.arc(c.x - c.r * 0.55, c.y + 4, c.r * 0.75, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    });
+
+    // Рядовые враги
+    enemies.forEach(renderEnemy);
+
+    // Босс
+    if (currentBoss) renderBoss(currentBoss);
+
+    // Вражеские пули
+    enemyBullets.forEach(eb => {
+      ctx.fillStyle = eb.color || '#7dd3fc';
+      ctx.beginPath();
+      ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Бонусы
+    bonuses.forEach(bn => {
+      ctx.save();
+      ctx.translate(bn.x, bn.y);
+      if (bn.type === 'multi') {
+        ctx.beginPath(); ctx.arc(0, 0, bn.r, 0, Math.PI * 2); ctx.fillStyle = '#10b981'; ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(-6, 3); ctx.lineTo(0, -5); ctx.lineTo(6, 3); ctx.stroke();
+      } else if (bn.type === 'damage') {
+        ctx.beginPath(); ctx.arc(0, 0, bn.r, 0, Math.PI * 2); ctx.fillStyle = '#f59e0b'; ctx.fill();
+        drawStar(0, 0, 5, 8, 4, '#fff');
+      } else if (bn.type === 'heart') {
+        ctx.beginPath(); ctx.arc(0, 0, bn.r, 0, Math.PI * 2); ctx.fillStyle = '#ef4444'; ctx.fill();
+        drawHeart(0, -4, 10, '#fff');
+      } else if (bn.type === 'shield') {
+        ctx.beginPath(); ctx.arc(0, 0, bn.r, 0, Math.PI * 2); ctx.fillStyle = '#06b6d4'; ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke();
+      }
+      ctx.restore();
+    });
+
+    // Пули игрока
+    ctx.fillStyle = '#ffffff';
+    bullets.forEach(b => {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 4.8, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Солнышко (мигает при уроне)
+    if (isInvulnerable <= 0 || Math.floor(performance.now() / 100) % 2 === 0) {
+      drawSun(player.x, player.y, player.r, player.rot, player.victoryScale);
+    }
+
+    // Искры / частицы
+    particles.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+    });
+
+    // Вспышка экрана
+    if (screenFlash > 0) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${screenFlash})`;
+      ctx.fillRect(0, 0, W, H);
+      screenFlash -= 0.05;
+    }
+
+    // Конфетти финала
+    confetti.forEach(c => {
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.rotate(c.rot);
+      ctx.fillStyle = c.color;
+      ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
+      ctx.restore();
+    });
+
+    // --- ИНТЕРФЕЙС (HUD) ---
+    if (!isGameWon && !isGameOver) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 18px -apple-system, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`Очки: ${score}`, 18, 38);
+      ctx.fillText(`Уровень: ${level} / ${maxLevels}`, 18, 64);
+
+      // Сердечки
+      for (let i = 0; i < maxLives; i++) {
+        drawHeart(28 + i * 26, 82, 16, i < lives ? '#ffd21e' : '#475569');
+      }
+
+      ctx.font = 'bold 15px -apple-system, sans-serif';
+      ctx.fillText(`Урон: ${bulletDamage}`, 18, 126);
+      if (combo > 1) {
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText(`Комбо: x${combo}`, 18, 148);
+      }
+
+      // Индикатор приближения босса
+      if (!bossSpawned && !isTransitioning) {
+        const remaining = Math.max(0, KILLS_PER_LEVEL - killedNormalInLevel);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '14px -apple-system, sans-serif';
+        ctx.fillText(`До босса: ${remaining} туч`, 18, 172);
+      }
+
+      // Кнопка ВСПЫШКА (без кнопки "ВЫЙТИ")
+      const btn = getFlashBtnRect();
+      ctx.fillStyle = flashCharge >= 100 ? '#f59e0b' : '#334155';
+      ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 14px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ВСПЫШКА', btn.x + btn.w / 2, btn.y + 19);
+      ctx.font = '12px -apple-system, sans-serif';
+      ctx.fillText(`${Math.floor(flashCharge)}%`, btn.x + btn.w / 2, btn.y + 35);
+    }
+
+    // Экран перехода
+    if (isTransitioning) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.font = 'bold 24px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`ПЕРЕХОД НА УРОВЕНЬ ${level + 1}`, W * 0.5, H * 0.45);
+    }
+
+    // Экран победы
+    if (isGameWon) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 32px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ПОБЕДА!', W * 0.5, H * 0.62);
+
+      ctx.font = '20px -apple-system, sans-serif';
+      ctx.fillStyle = '#fde047';
+      ctx.fillText(`Финальный счет: ${score}`, W * 0.5, H * 0.68);
+
+      // Пульсирующий текст закрытия
+      const alphaPulse = 0.5 + Math.sin(performance.now() / 250) * 0.5;
+      ctx.fillStyle = `rgba(255, 255, 255, ${alphaPulse})`;
+      ctx.font = 'bold 17px -apple-system, sans-serif';
+      ctx.fillText('коснитесь, чтобы закрыть', W * 0.5, H * 0.76);
+    }
+
+    // Экран поражения
+    if (isGameOver) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'bold 30px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ИГРА ОКОНЧЕНА', W * 0.5, H * 0.45);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '18px -apple-system, sans-serif';
+      ctx.fillText(`Счет: ${score}`, W * 0.5, H * 0.51);
+
+      const alphaPulse = 0.5 + Math.sin(performance.now() / 300) * 0.5;
+      ctx.fillStyle = `rgba(255, 255, 255, ${alphaPulse})`;
+      ctx.font = '16px -apple-system, sans-serif';
+      ctx.fillText('Коснитесь экрана для рестарта', W * 0.5, H * 0.58);
+    }
+  }
+
+  // Главный цикл с Fixed Timestep
+  function loop(currentTime) {
+    const frameTime = Math.min((currentTime - lastTimestamp) / 1000, 0.1);
+    lastTimestamp = currentTime;
+
+    accumulator += frameTime;
+    while (accumulator >= FIXED_DT) {
+      updateLogic(FIXED_DT);
+      accumulator -= FIXED_DT;
+    }
+
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
+});
+</script>
 </body>
 </html>
