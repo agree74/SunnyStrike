@@ -1,103 +1,224 @@
 // ============================================================================
-// SUNNY STRIKE - Полная версия по ТЗ
+// SUNNY STRIKE - PRO VERSION (ALL ENHANCEMENTS)
 // ============================================================================
 
-const tg = window.Telegram.WebApp;
+const tg = window.Telegram?.WebApp || {
+    ready: () => {},
+    expand: () => {},
+    HapticFeedback: {
+        impactOccurred: () => {},
+        notificationOccurred: () => {}
+    },
+    sendData: () => {},
+    close: () => {}
+};
 tg.ready();
 tg.expand();
 
-// === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
+// === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ И СОСТОЯНИЯ ===
 let bestScore = parseInt(localStorage.getItem('bestScore') || '0');
-let audioCtx;
+let audioCtx = null;
+let musicInterval = null;
+let musicStep = 0;
+let isAudioEnabled = false;
+
 let gameState = "playing";
 let score = 0, level = 1, lives = 3;
 let weaponLevel = 1, playerDamage = 1, bulletMultiplier = 1;
-let greenBulletsActive = false;  // ← Зелёные пули (временный бонус)
+let greenBulletsActive = false;
 let isInvulnerable = false, isBossActive = false, isBossInvulnerable = false;
 
+// Новые механики: Комбо и Ульта (Flash)
+let comboCount = 0;
+let comboMultiplier = 1;
+let comboTimer = null;
+let ultCharge = 0; // 0..100%
+const MAX_ULT = 100;
+let isShieldActive = false;
+
 // === ИГРОВЫЕ ОБЪЕКТЫ ===
-let player, bullets, clouds, bonuses, boss, bossBar, bgClouds, particles;
-let scoreText, levelText, livesText, bestScoreText, damageText;
+let player, bullets, enemyBullets, clouds, bonuses, boss, bossBar, bgClouds, particles;
+let scoreText, levelText, livesText, bestScoreText, damageText, comboText, ultButton;
 let exitButton;
 
 // ============================================================================
-// AUDIO SYSTEM
+// НАСТРОЙКИ УРОВНЕЙ
+// ============================================================================
+const LEVEL_CONFIG = {
+    1: { name: "Голубое небо", enemy: "cloud1", enemyHp: 1, speed: 200, color: "#2575fc", bossBullets: 1 },
+    2: { name: "Грозовой фронт", enemy: "cloud2", enemyHp: 2, speed: 240, color: "#1a365d", bossBullets: 2 },
+    3: { name: "Закат", enemy: "cloud3", enemyHp: 3, speed: 280, color: "#b83280", bossBullets: 3 },
+    4: { name: "Стратосфера", enemy: "crystal", enemyHp: 5, speed: 320, color: "#2d3748", bossBullets: 4 },
+    5: { name: "Орбита", enemy: "debris", enemyHp: 7, speed: 380, color: "#0d1117", bossBullets: 5 }
+};
+
+function getEnemyHp(baseHp) {
+    return baseHp + Math.floor(level / 2);
+}
+
+// ============================================================================
+// УЛУЧШЕННАЯ АУДИОСИСТЕМА (СИНТВЕЙВ + ФИЛЬТРЫ + HAPTICS)
 // ============================================================================
 
 function initAudio() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    //console.log('initAudio вызван, состояние:', audioCtx.state);
+    if (!audioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+            audioCtx = new AudioContextClass();
+        }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+    if (!musicInterval && audioCtx) {
+        startProceduralMusic();
+    }
+    isAudioEnabled = true;
 }
 
-// ============================================================================
-// PROCEDURAL SYNTHESIS (Phaser 3 Web Audio API)
-// ============================================================================
+// Фоновый процедурный синтвейв-бит (0 КБ веса)
+function startProceduralMusic() {
+    // 120 BPM -> 16-е ноты каждые 125 мс
+    const bassNotes = [110, 110, 130.81, 110, 98, 98, 110, 123.47]; // A2, C3, G2, B2
+    const arpNotes = [440, 523.25, 659.25, 523.25, 392, 493.88, 587.33, 493.88];
 
-// Компактный процедурный синтезатор звуков
+    musicInterval = setInterval(() => {
+        if (!audioCtx || audioCtx.state !== 'running' || gameState !== 'playing') return;
+
+        const now = audioCtx.currentTime;
+        const step = musicStep % 16;
+        musicStep++;
+
+        // Басовая линия (каждые 2 шага)
+        if (step % 2 === 0) {
+            const freq = bassNotes[Math.floor((step / 2) % bassNotes.length)];
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            const filter = audioCtx.createBiquadFilter();
+
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(400, now);
+
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(freq, now);
+
+            gain.gain.setValueAtTime(0.04, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+
+            osc.connect(filter).connect(gain).connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.2);
+        }
+
+        // Кик/бит на каждый 4-й шаг
+        if (step % 4 === 0) {
+            const kickOsc = audioCtx.createOscillator();
+            const kickGain = audioCtx.createGain();
+            kickOsc.frequency.setValueAtTime(140, now);
+            kickOsc.frequency.exponentialRampToValueAtTime(30, now + 0.08);
+
+            kickGain.gain.setValueAtTime(0.08, now);
+            kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+            kickOsc.connect(kickGain).connect(audioCtx.destination);
+            kickOsc.start(now);
+            kickOsc.stop(now + 0.09);
+        }
+
+        // Легкое фоновое арпеджио
+        if (step % 4 === 2) {
+            const arpFreq = arpNotes[step % arpNotes.length];
+            const aOsc = audioCtx.createOscillator();
+            const aGain = audioCtx.createGain();
+            aOsc.type = 'sine';
+            aOsc.frequency.setValueAtTime(arpFreq, now);
+
+            aGain.gain.setValueAtTime(0.015, now);
+            aGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+
+            aOsc.connect(aGain).connect(audioCtx.destination);
+            aOsc.start(now);
+            aOsc.stop(now + 0.16);
+        }
+    }, 125);
+}
+
+// Звуковые эффекты с мягкими Low-Pass фильтрами
 function playSFX(scene, type) {
-    const ctx = scene.sound.context;
-    if (ctx.state === 'suspended') ctx.resume();
+    if (!audioCtx) {
+        initAudio();
+    }
+    if (!audioCtx || audioCtx.state !== 'running') return;
+
+    const ctx = audioCtx;
     const now = ctx.currentTime;
 
-    const osc = (f, e, d, w, t = now, v = 0.1) => {
+    const osc = (f, e, d, w, t = now, v = 0.08, filterFreq = 1800) => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(filterFreq, t);
+
         o.type = w;
         o.frequency.setValueAtTime(f, t);
-        if (f !== e) o.frequency.exponentialRampToValueAtTime(e, t + d);
+        if (f !== e) o.frequency.exponentialRampToValueAtTime(Math.max(10, e), t + d);
+
         g.gain.setValueAtTime(v, t);
         g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-        o.connect(g).connect(ctx.destination);
-        o.start(t); o.stop(t + d);
+
+        o.connect(filter).connect(g).connect(ctx.destination);
+        o.start(t);
+        o.stop(t + d);
     };
 
     switch(type) {
-        case 'shoot': // 8-бит Пиу
-            osc(600, 100, 0.2, 'triangle'); 
+        case 'shoot':
+            osc(750, 220, 0.12, 'triangle', now, 0.04, 2500);
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
             break;
-            
-        case 'hit': // Всплеск/Слизь
-            osc(400, 50, 0.2, 'sine'); 
+
+        case 'hit':
+            osc(350, 80, 0.08, 'sine', now, 0.06, 1200);
             break;
-            
-        case 'hurt': // Цифровой спад (Потеря жизни)
-            [523, 440, 349, 261].forEach((f, i) => osc(f, f - 50, 0.15, 'square', now + i * 0.1));
+
+        case 'enemy_death':
+            osc(180, 40, 0.22, 'square', now, 0.08, 800);
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
             break;
-            
-        case 'boss_win': // Победа над боссом (уровни 1-4)
-            [523, 659, 783, 1046].forEach((f, i) => osc(f, f, 0.4, 'square', now + i * 0.08));
+
+        case 'hurt':
+            [440, 330, 220, 110].forEach((f, i) => osc(f, f - 30, 0.12, 'sawtooth', now + i * 0.08, 0.08, 1000));
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
             break;
-            
-        case 'boss5_win': // Победа над боссом 5 (начало финала)
-            [523, 523, 523, 698].forEach((f, i) => osc(f, f, 0.6, 'sawtooth', now + i * 0.15));
-            osc(1046, 1046, 1.2, 'sawtooth', now + 0.6, 0.05);
+
+        case 'powerup':
+            [523, 659, 783, 1046].forEach((f, i) => osc(f, f, 0.15, 'triangle', now + i * 0.06, 0.06, 3000));
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
             break;
-            
-        case 'game_over': // Проигрыш (грустная мелодия)
-            [392, 370, 349].forEach((f, i) => osc(f, f - 10, 1.2, 'sawtooth', now + i * 0.6));
+
+        case 'ult':
+            osc(120, 800, 0.4, 'sawtooth', now, 0.15, 3500);
+            [523, 783, 1046, 1318].forEach((f, i) => osc(f, f * 1.2, 0.25, 'triangle', now + 0.1 + i * 0.05, 0.08));
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('heavy');
             break;
-            
-        case 'evil_triumph': // Торжество зла (Черная дыра)
-            [110, 103, 98, 82].forEach((f, i) => osc(f, f, 1.5, 'sawtooth', now + i * 0.8, 0.07));
+
+        case 'boss_win':
+            [523, 659, 783, 1046, 1318].forEach((f, i) => osc(f, f, 0.35, 'triangle', now + i * 0.08, 0.08));
             break;
-            
-        case 'powerup': // Бонус
-            osc(800, 1200, 0.3, 'triangle', now, 0.1);
-            break;
-            
-        case 'enemy_death': // Смерть врага
-            osc(100, 50, 0.15, 'triangle', now, 0.15);
+
+        case 'game_over':
+            [349, 329, 293, 261].forEach((f, i) => osc(f, f - 15, 0.8, 'sawtooth', now + i * 0.4, 0.08, 900));
             break;
     }
 }
-
 // ============================================================================
 // PHASER CONFIG
 // ============================================================================
 
 const config = {
-    type: Phaser.AUTO,  // Автоматический выбор (WebGL или Canvas)
+    type: Phaser.AUTO,
     width: window.innerWidth,
     height: window.innerHeight,
     parent: 'game-container',
@@ -110,1084 +231,647 @@ const config = {
         arcade: { gravity: { y: 0 }, debug: false }
     },
     scene: { preload, create, update },
-    backgroundColor: '#4ea1d3'
+    backgroundColor: '#1a365d'
 };
 
 const game = new Phaser.Game(config);
 
 // ============================================================================
-// PRELOAD - ГРАФИКА (КРАСИВАЯ!)
+// PRELOAD - ПРОЦЕДУРНАЯ ГРАФИКА ВЫСОКОЙ ЧЁТКОСТИ
 // ============================================================================
-
 
 function preload() {
     const g = this.make.graphics({ x: 0, y: 0, add: false });
-    
-    // === 1.1 СОЛНЫШКО Обычное - вариант 1 (80x80) ===
-    for(let i=0; i<12; i++) {
+
+    // Вспомогательная функция для создания кругового градиента на Canvas
+    const createRadial = (key, size, innerColor, outerColor, radius = size / 2) => {
+        const canvas = this.textures.createCanvas(key, size, size);
+        const ctx = canvas.getContext();
+        const rad = ctx.createRadialGradient(size / 2, size / 2, 2, size / 2, size / 2, radius);
+        rad.addColorStop(0, innerColor);
+        rad.addColorStop(1, outerColor);
+        ctx.fillStyle = rad;
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, radius, 0, Math.PI * 2);
+        ctx.fill();
+        canvas.refresh();
+    };
+
+    // 1. ИГРОК: СОЛНЫШКО С МЯГКОЙ КОРОНОЙ (80x80)
+    createRadial('sun_glow', 90, 'rgba(255, 230, 100, 0.9)', 'rgba(255, 140, 0, 0)');
+
+    // 1.1 Нормальное солнышко
+    g.fillStyle(0xffaa00, 0.4);
+    g.fillCircle(40, 40, 36);
+    for (let i = 0; i < 12; i++) {
         const angle = (i / 12) * Math.PI * 2;
-        g.fillStyle(0xffdd00);
+        g.fillStyle(0xffe066);
         g.fillCircle(40 + Math.cos(angle) * 28, 40 + Math.sin(angle) * 28, 5);
     }
-    g.fillStyle(0xffcc00);
+    g.fillStyle(0xffd000);
     g.fillCircle(40, 40, 24);
-    g.fillStyle(0x000000);
-    g.fillCircle(33, 36, 3);
-    g.fillCircle(47, 36, 3);
-    g.lineStyle(2, 0x000000);
+    g.fillStyle(0x1a202c);
+    g.fillCircle(33, 36, 3.5);
+    g.fillCircle(47, 36, 3.5);
+    g.fillStyle(0xffffff);
+    g.fillCircle(34, 35, 1);
+    g.fillCircle(48, 35, 1);
+    g.lineStyle(2.5, 0x1a202c);
     g.beginPath();
-    g.arc(40, 46, 10, 0.15 * Math.PI, 0.85 * Math.PI);
+    g.arc(40, 45, 10, 0.15 * Math.PI, 0.85 * Math.PI);
     g.strokePath();
     g.generateTexture('sun_normal', 80, 80);
     g.clear();
-    
-    // === 1.2 СОЛНЫШКО Раненое - вариант 2 (80x80) ===
-    for(let i=0; i<12; i++) {
+
+    // 1.2 Раненое солнышко
+    g.fillStyle(0xe53e3e, 0.3);
+    g.fillCircle(40, 40, 34);
+    for (let i = 0; i < 12; i++) {
         const angle = (i / 12) * Math.PI * 2;
-        g.fillStyle(0xccaa00);
-        g.fillCircle(40 + Math.cos(angle) * 28, 40 + Math.sin(angle) * 28, 5);
+        g.fillStyle(0xdd6b20);
+        g.fillCircle(40 + Math.cos(angle) * 28, 40 + Math.sin(angle) * 28, 4);
     }
-    g.fillStyle(0xffaa00);
+    g.fillStyle(0xed8936);
     g.fillCircle(40, 40, 24);
-    g.fillStyle(0x000000);
-    g.fillCircle(33, 36, 3);
-    g.fillCircle(47, 36, 3);
-    g.lineStyle(2, 0x000000);
+    g.lineStyle(3, 0x1a202c);
     g.beginPath();
-    g.moveTo(29, 32);
-    g.lineTo(37, 34);
-    g.moveTo(51, 32);
-    g.lineTo(43, 34);
+    g.moveTo(30, 32); g.lineTo(37, 38);
+    g.moveTo(37, 32); g.lineTo(30, 38);
+    g.moveTo(43, 32); g.lineTo(50, 38);
+    g.moveTo(50, 32); g.lineTo(43, 38);
     g.strokePath();
     g.beginPath();
-    g.moveTo(32, 52);
-    g.lineTo(40, 48);
-    g.lineTo(48, 52);
-    g.strokePath();
-    g.beginPath();
-    g.moveTo(28, 30);
-    g.lineTo(36, 32);
-    g.moveTo(52, 30);
-    g.lineTo(44, 32);
+    g.moveTo(34, 48); g.lineTo(40, 44); g.lineTo(46, 48);
     g.strokePath();
     g.generateTexture('sun_hurt', 80, 80);
     g.clear();
-    
-    // === 1.3 СОЛНЫШКО Счастливое - вариант 3 (120x120) ===
-    for(let i=0; i<12; i++) {
-        const angle = (i / 12) * Math.PI * 2;
-        g.fillStyle(0xffdd00);
-        g.fillCircle(60 + Math.cos(angle) * 50, 60 + Math.sin(angle) * 50, 9);
-    }
-    g.fillStyle(0xffcc00);
-    g.fillCircle(60, 60, 44);
-    g.fillStyle(0x000000);
-    g.fillCircle(47, 53, 6);
-    g.fillCircle(73, 53, 6);
-    g.fillStyle(0xffffff);
-    g.fillCircle(50, 50, 3);
-    g.fillCircle(76, 50, 3);
-    g.lineStyle(4, 0xcc3300);
-    g.beginPath();
-    g.arc(60, 75, 24, 0.1 * Math.PI, 0.9 * Math.PI);
-    g.strokePath();
-    g.generateTexture('sun_happy', 120, 120);
-    g.clear();
-    
-    // === 2.1 ОБЛАКО - вариант 2 (80x60) ===
-    g.fillStyle(0xf8f8f8);
-    g.fillCircle(40, 32, Math.max(32, 12) / 2);
-    g.fillStyle(0xf0f0f0);
-    g.fillCircle(20, 26, 10);
-    g.fillCircle(60, 26, 10);
-    g.fillCircle(40, 22, 12);
-    g.fillStyle(0x000000);
-    g.fillCircle(32, 34, 2);
-    g.fillCircle(48, 34, 2);
-    g.lineStyle(3, 0x000000);
+
+    // 1.3 Счастливое солнышко (Финал)
+    createRadial('sun_happy', 120, '#fff3b0', '#e65100', 55);
+
+    // 2. ВРАГИ
+    // 2.1 Облако (80x60)
+    g.fillStyle(0xffffff, 0.95);
+    g.fillCircle(40, 32, 20);
+    g.fillCircle(24, 30, 14);
+    g.fillCircle(56, 30, 14);
+    g.fillStyle(0x2d3748);
+    g.fillCircle(33, 32, 2.5);
+    g.fillCircle(47, 32, 2.5);
+    g.lineStyle(2, 0x2d3748);
     g.beginPath();
     g.arc(40, 40, 6, 0.2 * Math.PI, 0.8 * Math.PI, true);
     g.strokePath();
     g.generateTexture('cloud1', 80, 60);
     g.clear();
-    
-    // === 2.2 ГРОЗОВАЯ ТУЧА - вариант 2 (80x75) ===
-    g.fillStyle(0x4a4a5a);
-    g.fillCircle(40, 38, Math.max(32, 14) / 2);
-    g.fillStyle(0x4a4a5a);
-    g.fillCircle(20, 26, 12);
-    g.fillCircle(40, 22, 14);
-    g.fillCircle(60, 26, 12);
-    g.lineStyle(4, 0xffff00);
-    for(let i=0; i<3; i++) {
-        const mx = 16 + i * 24;
+
+    // 2.2 Грозовая туча (80x75)
+    g.fillStyle(0x4a5568);
+    g.fillCircle(40, 36, 22);
+    g.fillCircle(22, 34, 15);
+    g.fillCircle(58, 34, 15);
+    g.lineStyle(3, 0xf6e05e);
+    for (let i = 0; i < 3; i++) {
+        const mx = 24 + i * 16;
         g.beginPath();
-        g.moveTo(mx, 44);
-        g.lineTo(mx - 6, 54);
-        g.lineTo(mx, 54);
-        g.lineTo(mx - 6, 64);
+        g.moveTo(mx, 46); g.lineTo(mx - 4, 54);
+        g.lineTo(mx + 2, 54); g.lineTo(mx - 3, 64);
         g.strokePath();
     }
-    g.fillStyle(0x000000);
-    g.fillCircle(32, 38, 2);
-    g.fillCircle(48, 38, 2);
-    g.lineStyle(4, 0x000000);
-    g.beginPath();
-    g.arc(40, 46, 7, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
+    g.fillStyle(0xf56565);
+    g.fillCircle(33, 34, 2.5);
+    g.fillCircle(47, 34, 2.5);
     g.generateTexture('cloud2', 80, 75);
     g.clear();
-    
-    // === 2.3 ПЕРИСТОЕ ОБЛАКО - вариант 1 (100x50) ===
-    g.fillStyle(0xffcccc);
-    g.fillCircle(50, 25, Math.max(42, 8) / 2);
-    g.fillStyle(0xffdddd);
-    g.fillCircle(25, 18, 10);
-    g.fillCircle(38, 15, 10);
-    g.fillCircle(50, 14, 11);
-    g.fillCircle(62, 15, 10);
-    g.fillCircle(75, 18, 10);
-    g.fillStyle(0x000000);
-    g.fillCircle(38, 28, 2);
-    g.fillCircle(62, 28, 2);
-    g.lineStyle(3, 0x000000);
-    g.beginPath();
-    g.arc(50, 34, 7, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
+
+    // 2.3 Перистое облако (100x50)
+    g.fillStyle(0xfbb6ce);
+    g.fillCircle(50, 25, 18);
+    g.fillCircle(28, 25, 12);
+    g.fillCircle(72, 25, 12);
+    g.fillStyle(0x702459);
+    g.fillCircle(42, 24, 2.5);
+    g.fillCircle(58, 24, 2.5);
     g.generateTexture('cloud3', 100, 50);
     g.clear();
-    
-    // === 2.4 КРИСТАЛЛ - вариант 1 (70x70) ===
-    g.fillStyle(0x00ffff);
-    g.fillTriangle(35, 5, 55, 35, 35, 65);
-    g.fillTriangle(35, 5, 15, 35, 35, 65);
-    g.lineStyle(4, 'rgba(255,255,255,0.7)');
-    g.beginPath();
-    g.moveTo(35, 5);
-    g.lineTo(55, 35);
-    g.lineTo(35, 65);
-    g.lineTo(15, 35);
-    g.closePath();
-    g.strokePath();
-    g.lineStyle(3, 'rgba(255,255,255,0.7)');
-    g.beginPath();
-    g.moveTo(35, 10);
-    g.lineTo(35, 60);
-    g.moveTo(20, 35);
-    g.lineTo(50, 35);
-    g.strokePath();
-    g.fillStyle(0x003333);
-    g.fillCircle(28, 25, 2.5);
-    g.fillCircle(42, 25, 2.5);
-    g.lineStyle(4, 0x003333);
-    g.beginPath();
-    g.arc(35, 45, 6, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
+
+    // 2.4 Кристалл (70x70)
+    g.fillStyle(0x63b3ed);
+    g.fillTriangle(35, 5, 60, 35, 35, 65);
+    g.fillTriangle(35, 5, 10, 35, 35, 65);
+    g.fillStyle(0xbee3f8);
+    g.fillTriangle(35, 10, 50, 35, 35, 55);
     g.generateTexture('crystal', 70, 70);
     g.clear();
-    
-    // === 2.5 ТЕХНО-МУСОР - вариант 7 (70x70) ===
-    g.fillStyle(0x999999);
-    g.fillRect(17, 17, 36, 36);
-    g.lineStyle(8, 0x666666);
-    for(let i=0; i<6; i++) {
-        const angle = (i / 6) * Math.PI + Math.PI;
-        const startX = 35 + Math.cos(angle) * 20;
-        const startY = 35 + Math.sin(angle) * 20;
-        const endX = 35 + Math.cos(angle) * 35;
-        const endY = 35 + Math.sin(angle) * 35;
-        g.beginPath();
-        g.moveTo(startX, startY);
-        g.lineTo(endX, endY);
-        g.strokePath();
-    }
-    g.fillStyle(0xff0000);
-    g.fillCircle(35, 32, 6);
-    g.fillStyle(0xffffff);
-    g.fillCircle(33, 30, 2);
-    g.fillStyle(0xff0000);
-    g.fillCircle(27, 25, 2);
-    g.fillCircle(43, 25, 2);
-    g.lineStyle(4, 0xff0000);
-    g.beginPath();
-    g.arc(35, 45, 6, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
+
+    // 2.5 Техно-мусор (70x70)
+    g.fillStyle(0x718096);
+    g.fillRect(18, 18, 34, 34);
+    g.lineStyle(4, 0xe2e8f0);
+    g.strokeRect(20, 20, 30, 30);
+    g.fillStyle(0xe53e3e);
+    g.fillCircle(35, 35, 6);
     g.generateTexture('debris', 70, 70);
     g.clear();
-    
-    // === 3.1 БОСС 1 - Грозовая Туча (120x120) ===
-    g.fillStyle(0x333344);
-    g.fillCircle(60, 60, 45);
-    g.lineStyle(4, 0xffff00);
-    for(let i=0; i<8; i++) {
-        const angle = (i / 8) * Math.PI * 2;
-        g.beginPath();
-        g.moveTo(60 + Math.cos(angle) * 40, 60 + Math.sin(angle) * 40);
-        g.lineTo(60 + Math.cos(angle) * 65, 60 + Math.sin(angle) * 65);
-        g.strokePath();
-    }
-    g.fillStyle(0xff0000);
-    g.fillCircle(45, 50, Math.max(12, 10) / 2);
-    g.fillCircle(75, 50, Math.max(12, 10) / 2);
-    g.fillStyle(0x000000);
-    g.fillCircle(45, 50, 4);
-    g.fillCircle(75, 50, 4);
-    g.lineStyle(4, 0x000000);
-    g.beginPath();
-    g.moveTo(35, 40);
-    g.lineTo(52, 44);
-    g.moveTo(85, 40);
-    g.lineTo(68, 44);
-    g.strokePath();
-    g.lineStyle(4, 0xff0000);
-    g.beginPath();
-    g.arc(60, 78, 14, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
-    g.generateTexture('boss1', 120, 120);
-    g.clear();
-    
-    // === 3.2 БОСС 2 - Штормовой Вихрь (120x120) ===
-    g.fillStyle(0x4a5a6a);
-    g.fillCircle(60, 60, 45);
-    g.lineStyle(4, 0x6a7a8a);
-    for(let arm=0; arm<4; arm++) {
-        g.beginPath();
-        for(let i=0; i<50; i++) {
-            const a = (arm / 4) * Math.PI * 2 + i * 0.15;
-            const r = 15 + i;
-            if(i===0) g.moveTo(60 + Math.cos(a) * r, 60 + Math.sin(a) * r);
-            else g.lineTo(60 + Math.cos(a) * r, 60 + Math.sin(a) * r);
-        }
-        g.strokePath();
-    }
-    g.fillStyle(0xff0000);
-    g.fillCircle(50, 55, 6);
-    g.fillCircle(70, 55, 6);
-    g.fillStyle(0x000000);
-    g.fillCircle(50, 55, 2);
-    g.fillCircle(70, 55, 2);
-    g.lineStyle(3, 0xff0000);
-    g.beginPath();
-    g.arc(60, 75, 12, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
-    g.generateTexture('boss2', 120, 120);
-    g.clear();
-    
-    // === 3.3 БОСС 3 - Затмение (120x120) ===
-    for(let i=0; i<12; i++) {
-        const a = (i / 12) * Math.PI * 2;
-        g.fillStyle(0xff6600);
-        g.beginPath();
-        g.moveTo(60 + Math.cos(a) * 45, 60 + Math.sin(a) * 45);
-        g.lineTo(60 + Math.cos(a) * 65, 60 + Math.sin(a) * 65);
-        g.lineTo(60 + Math.cos(a + 0.26) * 45, 60 + Math.sin(a + 0.26) * 45);
-        g.fill();
-    }
-    g.fillStyle(0xffcc00);
-    g.fillCircle(60, 60, 45);
-    g.fillStyle(0x111111);
-    g.fillCircle(75, 60, 42);
-    g.fillStyle(0xff0000);
-    g.fillCircle(68, 50, 6);
-    g.fillCircle(82, 50, 6);
-    g.fillStyle(0x000000);
-    g.fillCircle(68, 50, 2);
-    g.fillCircle(82, 50, 2);
-    g.lineStyle(3, 0xff0000);
-    g.beginPath();
-    g.arc(75, 75, 12, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
-    g.generateTexture('boss3', 120, 120);
-    g.clear();
-    
-    // === 3.4 БОСС 4 - Ледяной Гигант (120x120) ===
-    g.fillStyle(0xaaddff);
-    g.fillCircle(60, 60, 48);
-    g.fillStyle(0x4488cc);
-    g.fillCircle(50, 50, 40);
-    g.fillStyle(0x004488);
-    g.fillCircle(70, 70, 35);
-    g.fillStyle(0x00ffff);
-    g.fillCircle(45, 50, Math.max(12, 10) / 2);
-    g.fillCircle(75, 50, Math.max(12, 10) / 2);
-    g.fillStyle(0x000000);
-    g.fillCircle(45, 50, 4);
-    g.fillCircle(75, 50, 4);
-    g.lineStyle(4, 0xaaddff);
-    g.beginPath();
-    g.moveTo(35, 38);
-    g.lineTo(52, 42);
-    g.moveTo(85, 38);
-    g.lineTo(68, 42);
-    g.strokePath();
-    g.lineStyle(3, 0x00ffff);
-    g.beginPath();
-    g.arc(60, 80, 14, 0.2 * Math.PI, 0.8 * Math.PI, true);
-    g.strokePath();
-    g.generateTexture('boss4', 120, 120);
-    g.clear();
-    
-    // === 3.5 БОСС 5 - Чёрная Дыра (120x120) - НАСМЕШЛИВАЯ (вариант 5) ===
-    // Фиолетовая аура
-    g.fillStyle('rgba(200,0,200,0.4)');
-    g.fillCircle(60, 60, 70);
-    // Чёрная дыра
-    g.fillStyle(0x000000);
-    g.fillCircle(60, 60, 50);
-    g.lineStyle(4, 0xcc00cc);
-    g.strokeCircle(60, 60, 50);
-    // Насмешливые глаза
-    g.fillStyle(0xff66ff);
-    g.fillCircle(45, 50, 14);
-    g.fillCircle(75, 50, 14);
-    // Зрачки
-    g.fillStyle(0x000000);
-    g.fillCircle(43, 48, 5);
-    g.fillCircle(77, 48, 5);
-    // Поднятая бровь (одна выше другой)
-    g.lineStyle(4, 0xff66ff);
-    g.beginPath();
-    g.moveTo(30, 35);
-    g.lineTo(55, 38);
-    g.moveTo(90, 32);
-    g.lineTo(65, 38);
-    g.strokePath();
-    // Насмешливая полуулыбка
-    g.lineStyle(5, 0xff66ff);
-    g.beginPath();
-    g.arc(65, 75, 28, 0.25*Math.PI, 0.75*Math.PI, false);
-    g.strokePath();
-    g.generateTexture('boss5', 120, 120);
-    g.clear();
-    
-    // === 4.1 ПУЛЯ обычная (24x40) ===
-    g.fillStyle(0xffffff);
-    g.fillCircle(12, 20, Math.max(5, 15) / 2);
-    g.generateTexture('bullet', 24, 40);
-    g.clear();
-    
-    // === 4.2 ПУЛЯ усиленная (32x32) ===
-    // Градиент заменён на цвет
-    g.fillStyle(0xffffff);
-    g.fillCircle(16, 16, 14);
-    g.lineStyle(2, 0x00ffff);
-    g.fillStyle(0xffffff);
-    g.fillCircle(16, 16, 14);
-    g.lineStyle(2, 'rgba(0,255,255,0.5)');
-    g.strokeCircle(16, 16, 16);
-    g.generateTexture('bullet_double', 32, 32);
-    g.clear();
-    
-    // === 5.1 БОНУС Зелёный (50x50) ===
-    g.fillStyle(0x00ff00);
-    g.fillCircle(25, 25, 23);
-    g.lineStyle(3, 0xffffff);
-    g.strokeCircle(25, 25, 23);
-    g.lineStyle(3, 0xffffff);
-    g.beginPath();
-    g.moveTo(31, 13);
-    g.lineTo(19, 25);
-    g.lineTo(27, 25);
-    g.lineTo(19, 39);
-    g.strokePath();
-    g.generateTexture('bonus_double', 50, 50);
-    g.clear();
-    
-    // === 5.2 БОНУС Жёлтый (50x50) ===
-    g.fillStyle(0xffff00);
-    g.fillCircle(25, 25, 23);
-    g.lineStyle(3, 0xffffff);
-    g.strokeCircle(25, 25, 23);
-    g.lineStyle(2.5, 0xffffff);
-    g.beginPath();
-    for(let i=0; i<5; i++) {
-        const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
-        const inner = a + Math.PI / 5;
-        if(i===0) g.moveTo(25 + Math.cos(a) * 14, 25 + Math.sin(a) * 14);
-        else g.lineTo(25 + Math.cos(a) * 14, 25 + Math.sin(a) * 14);
-        g.lineTo(25 + Math.cos(inner) * 6, 25 + Math.sin(inner) * 6);
-    }
-    g.closePath();
-    g.strokePath();
-    g.generateTexture('bonus_speed', 50, 50);
-    g.clear();
-    
-    // === 5.3 БОНУС Фиолетовый (50x50) ===
-    g.fillStyle(0xff00ff);
-    g.fillCircle(25, 25, 23);
-    g.lineStyle(3, 0xffffff);
-    g.strokeCircle(25, 25, 23);
-    g.lineStyle(3, 0xffffff);
-    g.beginPath();
-    g.moveTo(25, 13);
-    g.lineTo(18, 25);
-    g.lineTo(22, 25);
-    g.lineTo(22, 35);
-    g.lineTo(28, 35);
-    g.lineTo(28, 25);
-    g.lineTo(32, 25);
-    g.closePath();
-    g.strokePath();
-    g.generateTexture('bonus_damage', 50, 50);
-    g.clear();
-    
-    // === 5.4 БОНУС Красный - сердечко (50x50) ===
-    g.fillStyle(0xff0000);
-    g.fillCircle(18, 22, 8);
-    g.fillCircle(32, 22, 8);
-    g.beginPath();
-    g.moveTo(10, 22);
-    g.lineTo(25, 42);
-    g.lineTo(40, 22);
-    g.fill();
-    g.fillStyle('rgba(255,255,255,0.4)');
-    g.fillCircle(20, 19, 3);
-    g.generateTexture('bonus_heart', 50, 50);
-    g.clear();
-    
-    // === 6. ФОНОВОЕ ОБЛАКО (100x50) ===
-    g.fillStyle('rgba(255,255,255,0.1)');
-    g.fillCircle(50, 25, Math.max(35, 12) / 2);
-    g.fillStyle('rgba(255,255,255,0.1)');
-    g.fillCircle(30, 21, 10);
-    g.fillCircle(70, 21, 10);
-    g.generateTexture('cloud_bg', 100, 50);
-    g.clear();
-    
-    // === 7.1 ПЛАНЕТА 1 - Меркурий (120x120) - из gallery_v4.html ===
-    // Градиент: ff8866 → cc5533 → 662211
-    g.fillStyle(0xff8866);
-    g.fillCircle(60, 60, 50);
-    g.fillStyle(0xcc5533);
-    g.fillCircle(60, 60, 45);
-    g.fillStyle(0x662211);
-    g.fillCircle(60, 60, 40);
-    // Кратеры
-    g.fillStyle('rgba(100,40,20,0.6)');
-    for(let i=0; i<13; i++) {
-        g.fillCircle(60 + ((i%7)-3)*10, 60 + ((i%5)-2)*10, 3 + ((i%4)*2));
-    }
-    g.generateTexture('planet1', 120, 120);
-    g.clear();
 
-    // === 7.2 ПЛАНЕТА 2 - Венера (120x120) - из gallery_v4.html ===
-    // Градиент: ffcc88 → ff9944 → cc6600 + полосы
-    g.fillStyle(0xffcc88);
-    g.fillCircle(60, 60, 48);
-    g.fillStyle(0xff9944);
-    g.fillCircle(60, 60, 44);
-    g.fillStyle(0xcc6600);
-    g.fillCircle(60, 60, 40);
-    // Полосы облаков (эллипсы заменены на круги)
-    g.fillStyle('rgba(255,200,150,0.4)');
-    for(let i=0; i<5; i++) {
-        g.fillCircle(60, 60 - 20 + i*10, 22);
-    }
-    g.generateTexture('planet2', 120, 120);
-    g.clear();
+    // 3. БОССЫ (120x120)
+    // 3.1 Босс 1 - Ураган
+    createRadial('boss1', 120, '#4a5568', '#1a202c', 55);
+    // 3.2 Босс 2 - Штормовой Вихрь
+    createRadial('boss2', 120, '#4299e1', '#2b6cb0', 55);
+    // 3.3 Босс 3 - Затмение
+    createRadial('boss3', 120, '#ed8936', '#9c4221', 55);
+    // 3.4 Босс 4 - Ледяной Гигант
+    createRadial('boss4', 120, '#90cdf4', '#2c5282', 55);
+    // 3.5 Босс 5 - Чёрная Дыра
+    createRadial('boss5', 120, '#d53f8c', '#171923', 58);
 
-    // === 7.3 ПЛАНЕТА 3 - Земля (120x120) - из gallery_v4.html ===
-    // Градиент: 4488ff → 003388 + континенты
-    g.fillStyle(0x4488ff);
-    g.fillCircle(60, 60, 50);
-    g.fillStyle(0x003388);
-    g.fillCircle(60, 60, 46);
-    // Континенты
-    g.fillStyle(0x44aa44);
-    g.fillCircle(45, 50, 18);
-    g.fillCircle(80, 65, 16);
-    // Облака
-    g.fillStyle('rgba(255,255,255,0.4)');
-    for(let i=0; i<4; i++) {
-        g.fillCircle(60 + ((i%5)-2)*15, 60 + ((i%3)-1)*20, 10);
-    }
-    g.generateTexture('planet3', 120, 120);
-    g.clear();
+    // 4. СНАРЯДЫ И ПУЛИ С НЕОНОВЫМ СВЕЧЕНИЕМ
+    createRadial('bullet', 24, '#ffffff', 'rgba(0, 195, 255, 0)', 10);
+    createRadial('bullet_double', 32, '#ffff66', 'rgba(255, 150, 0, 0)', 14);
+    createRadial('enemy_bullet', 20, '#ff4444', 'rgba(255, 0, 0, 0)', 9);
 
-    // === 7.4 ПЛАНЕТА 4 - Газовый гигант (120x120) - из gallery_v4.html ===
-    // Градиент: 88ff88 → 44aa44 → 006600 + полосы
-    g.fillStyle(0x88ff88);
-    g.fillCircle(60, 60, 52);
-    g.fillStyle(0x44aa44);
-    g.fillCircle(60, 60, 48);
-    g.fillStyle(0x006600);
-    g.fillCircle(60, 60, 44);
-    // Полосы
-    const colors = [0x66cc66, 0x44aa44, 0x228822, 0x006600, 0x66dd66];
-    g.globalAlpha = 0.6;
-    for(let i=0; i<8; i++) {
-        g.fillStyle(colors[(7+i)%5]);
-        g.fillCircle(60, 60 - 25 + i*8, 20);
-    }
-    g.globalAlpha = 1;
-    g.generateTexture('planet4', 120, 120);
-    g.clear();
+    // 5. БОНУСЫ (50x50) С ЯРКОЙ КАЙМОЙ
+    createRadial('bonus_double', 50, '#48bb78', 'rgba(72, 187, 120, 0)', 24);
+    createRadial('bonus_speed', 50, '#ecc94b', 'rgba(236, 201, 75, 0)', 24);
+    createRadial('bonus_damage', 50, '#9f7aea', 'rgba(159, 122, 234, 0)', 24);
+    createRadial('bonus_heart', 50, '#f56565', 'rgba(245, 101, 101, 0)', 24);
+    createRadial('bonus_shield', 50, '#00e5ff', 'rgba(0, 229, 255, 0)', 24);
 
-    // === 7.5 ПЛАНЕТА 5 - Ледяной гигант с кольцами (120x120) - из gallery_v4.html ===
-    // Градиент: cc88ff → 8844cc → 440088 + кольца
-    g.fillStyle(0xcc88ff);
-    g.fillCircle(60, 60, 45);
-    g.fillStyle(0x8844cc);
-    g.fillCircle(60, 60, 41);
-    g.fillStyle(0x440088);
-    g.fillCircle(60, 60, 37);
-    // Кольца (эллипсы заменены на окружности)
-    g.lineStyle(8, 'rgba(200,180,220,0.6)');
-    g.strokeCircle(60, 60, 75);
-    g.lineStyle(5, 'rgba(180,160,200,0.4)');
-    g.strokeCircle(60, 60, 68);
-    g.generateTexture('planet5', 120, 120);
-    g.clear();
+    // 6. СПЕЦЭФФЕКТЫ: Щит и Волна Ульты
+    createRadial('shield_fx', 100, 'rgba(0, 229, 255, 0.4)', 'rgba(0, 229, 255, 0)', 48);
+    createRadial('ult_wave', 200, 'rgba(255, 230, 100, 0.8)', 'rgba(255, 100, 0, 0)', 98);
+    createRadial('cloud_bg', 90, 'rgba(255, 255, 255, 0.25)', 'rgba(255, 255, 255, 0)', 42);
 
-    // === 8. ГАЛАКТИКА (250x250) - из gallery_v4.html ===
-    // Центр (градиент: white →ffffcc → transparent)
-    g.fillStyle(0xffffff);
-    g.fillCircle(125, 125, 50);
-    g.fillStyle(0xffffcc);
-    g.fillCircle(125, 125, 45);
-    // 4 спиральных рукава с 150 звёздами каждый
-    const armColors = [0xaaccff, 0xffcccc, 0xffffaa, 0xccffcc];
-    for(let arm=0; arm<4; arm++) {
-        for(let i=0; i<150; i++) {
-            const a = (arm/4)*Math.PI*2 + i*0.03;
-            const r = 50 + i*0.8;
-            const spread = ((i%5)-2)*2;
-            const x = 125 + Math.cos(a)*r + Math.cos(a+Math.PI/2)*spread;
-            const y = 125 + Math.sin(a)*r*0.7 + Math.sin(a+Math.PI/2)*spread;
-            g.globalAlpha = 0.1 + (150-i)/150*0.4;
-            g.fillStyle(armColors[arm]);
-            g.fillCircle(x, y, 1.5);
-        }
-    }
-    g.globalAlpha = 1;
-    g.generateTexture('galaxy', 250, 250);
-    g.clear();
-    
-    // === 8.5 ФИНАЛЬНАЯ ЧЁРНАЯ ДЫРА (250x250) - из blackhole_final.html вариант 5 ===
-    // Аура
-    g.fillStyle('rgba(200,0,200,0.4)');
-    g.fillCircle(125, 125, 125);
-    // Чёрная дыра
-    g.fillStyle(0x000000);
-    g.fillCircle(125, 125, 80);
-    g.lineStyle(4, 0xcc00cc);
-    g.strokeCircle(125, 125, 80);
-    // Насмешливые глаза
-    g.fillStyle(0xff66ff);
-    g.fillCircle(95, 105, 18);
-    g.fillCircle(155, 105, 18);
-    // Зрачки
-    g.fillStyle(0x000000);
-    g.fillCircle(93, 103, 6);
-    g.fillCircle(157, 103, 6);
-    // Поднятая бровь
-    g.lineStyle(4, 0xff66ff);
-    g.beginPath();
-    g.moveTo(75, 85);
-    g.lineTo(105, 88);
-    g.moveTo(175, 85);
-    g.lineTo(145, 88);
-    g.strokePath();
-    // Насмешливая полуулыбка
-    g.lineStyle(5, 0xff66ff);
-    g.beginPath();
-    g.arc(135, 135, 40, 0.25*Math.PI, 0.75*Math.PI, false);
-    g.strokePath();
-    g.generateTexture('final_blackhole', 250, 250);
-    g.clear();
-    
-    // === 9.1 ЧАСТИЦЫ (80x80) ===
-    for(let i=0; i<12; i++) {
-        const a = (i / 12) * Math.PI * 2;
-        const x = 40 + Math.cos(a) * 30;
-        const y = 40 + Math.sin(a) * 30;
-        g.fillStyle(0x88ccff);
-        g.fillCircle(x, y, 6);
-    }
-    g.generateTexture('particle', 80, 80);
-    g.clear();
-    
-    // === 9.2 КАПЛИ ДОЖДЯ (40x60) ===
-    for(let i=0; i<5; i++) {
-        g.fillStyle(0x88ccff);
-        g.fillCircle(15 + i*3, 30, Math.max(2, 15) / 2);
-    }
-    g.generateTexture('raindrop', 40, 60);
-    g.clear();
+    // 7. КОСМОС: Планеты, Галактика и Финальная Чёрная Дыра
+    createRadial('planet1', 120, '#f6ad55', '#7b341e', 50);
+    createRadial('planet2', 120, '#ecc94b', '#975a16', 50);
+    createRadial('planet3', 120, '#63b3ed', '#234e52', 50);
+    createRadial('planet4', 120, '#68d391', '#22543d', 50);
+    createRadial('planet5', 120, '#b794f4', '#44337a', 50);
+    createRadial('galaxy', 260, '#ffffff', 'rgba(107, 70, 193, 0)', 125);
+    createRadial('final_blackhole', 260, '#d53f8c', '#000000', 128);
 }
+// ============================================================================
+// CREATE - СБОРКА СЦЕНЫ, ИНТЕРФЕЙС И ЭФФЕКТЫ
+// ============================================================================
+
 function create() {
-    // Фикс для Web Audio API (активация контекста)
+    // Активация аудиоконтекста при старте
     if (this.sound.context.state === 'suspended') {
         this.sound.context.resume();
     }
-    
+
     this.cameras.main.setBackgroundColor(LEVEL_CONFIG[1].color);
-    
-    // === ФОН ===
+
+    // 1. МНОГОСЛОЙНЫЙ ПАРАЛЛАКС-ФОН
     bgClouds = this.add.group();
-    for(let i=0; i<15; i++) {
-        const bc = this.add.sprite(
+    for (let i = 0; i < 20; i++) {
+        const speedMultiplier = Phaser.Math.FloatBetween(0.5, 2.0);
+        const bc = this.add.image(
             Phaser.Math.Between(0, config.width),
             Phaser.Math.Between(0, config.height),
             'cloud_bg'
-        ).setAlpha(0.15).setScale(2).setDepth(-2);
+        )
+        .setAlpha(0.2)
+        .setScale(speedMultiplier)
+        .setDepth(-2);
+        bc.parallaxSpeed = speedMultiplier;
         bgClouds.add(bc);
     }
-    
-    // === ИГРОК ===
-    player = this.physics.add.sprite(config.width/2, config.height - 100, 'sun_normal');
+
+    // 2. ИГРОК И СВЕТЯЩАЯСЯ АУРА
+    const playerGlow = this.add.image(0, 0, 'sun_glow').setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.6);
+    player = this.physics.add.sprite(config.width / 2, config.height - 120, 'sun_normal');
     player.setCollideWorldBounds(true);
-    player.setDisplaySize(60, 60); // Уменьшаем до игрового размера (текстура 80x80)
-    
-    // === ГРУППЫ ===
+    player.setDisplaySize(64, 64);
+    player.glow = playerGlow;
+
+    // Световой шлейф за игроком
+    player.trailTimer = this.time.addEvent({
+        delay: 60,
+        callback: () => {
+            if (player && player.active && gameState === 'playing') {
+                const spark = this.add.circle(player.x, player.y + 15, 6, 0xffaa00, 0.7);
+                spark.setBlendMode(Phaser.BlendModes.ADD);
+                this.tweens.add({
+                    targets: spark,
+                    scale: 0.1,
+                    alpha: 0,
+                    y: spark.y + 35,
+                    duration: 350,
+                    onComplete: () => spark.destroy()
+                });
+            }
+        },
+        loop: true
+    });
+
+    // 3. ФИЗИЧЕСКИЕ ГРУППЫ
     bullets = this.physics.add.group();
+    enemyBullets = this.physics.add.group();
     clouds = this.physics.add.group();
     bonuses = this.physics.add.group();
-    
-    // === UI ===
+
+    // 4. UI И HUD (СЧЕТ, УРОВЕНЬ, КОМБО, УЛЬТА)
     scoreText = this.add.text(20, 20, 'Очки: 0', {
         fontSize: '22px', fill: '#ffffff', fontWeight: 'bold',
         stroke: '#000000', strokeThickness: 4
     });
-    
+
     bestScoreText = this.add.text(config.width - 20, 20, '🏆: ' + bestScore, {
         fontSize: '20px', fill: '#ffd700', fontWeight: 'bold',
         stroke: '#000000', strokeThickness: 4
     }).setOrigin(1, 0);
-    
+
     levelText = this.add.text(20, 50, 'Уровень: 1', {
-        fontSize: '20px', fill: '#ffff00', fontWeight: 'bold',
+        fontSize: '18px', fill: '#ffff00', fontWeight: 'bold',
         stroke: '#000000', strokeThickness: 4
     });
-    
-    // Отображение урона (глобальная переменная)
+
     damageText = this.add.text(20, 110, 'Урон: 1', {
-        fontSize: '18px', fill: '#ff6600', fontWeight: 'bold',
+        fontSize: '16px', fill: '#ff6600', fontWeight: 'bold',
         stroke: '#000000', strokeThickness: 4
     });
-    
+
+    comboText = this.add.text(20, 135, 'Комбо: x1', {
+        fontSize: '18px', fill: '#00ffcc', fontWeight: 'bold',
+        stroke: '#000000', strokeThickness: 4
+    });
+
     updateLivesText.call(this);
-    
-    // === КНОПКА ВЫХОДА ===
-    exitButton = this.add.text(config.width - 10, config.height - 30, 'Выйти', {
-        fontSize: '18px', fill: '#ffffff',
-        backgroundColor: '#ff4444', padding: { x: 10, y: 5 }
+
+    // КНОПКА УЛЬТЫ (СОЛНЕЧНАЯ ВСПЫШКА)
+    ultButton = this.add.text(config.width - 25, config.height - 100, 'ВСПЫШКА\n0%', {
+        fontSize: '14px', fill: '#ffffff', fontWeight: 'bold',
+        align: 'center', backgroundColor: '#4a5568',
+        padding: { x: 12, y: 10 }
     }).setOrigin(1, 1).setInteractive().setDepth(100);
-    
+
+    ultButton.on('pointerdown', () => {
+        triggerUltimate.call(this);
+    });
+
+    // КНОПКА ВЫХОДА
+    exitButton = this.add.text(config.width - 15, config.height - 25, 'Выйти', {
+        fontSize: '16px', fill: '#ffffff',
+        backgroundColor: '#e53e3e', padding: { x: 10, y: 5 }
+    }).setOrigin(1, 1).setInteractive().setDepth(100);
+
     exitButton.on('pointerdown', () => {
         sendScoreAndClose();
     });
-    
-    // === ИНИЦИАЛИЗАЦИЯ АУДИО (при первом клике) ===
-    let audioInitialized = false;
+
+    // ИНИЦИАЛИЗАЦИЯ АУДИО ПРИ ПЕРВОМ ТАПЕ
     this.input.once('pointerdown', () => {
-        if(!audioInitialized) {
-            initAudio();
-            audioInitialized = true;
-            //console.log('Аудио инициализировано!');
-        }
+        initAudio();
     });
-    
-    // === УПРАВЛЕНИЕ ===
+
+    // УПРАВЛЕНИЕ ТАПОМ/МЫШЬЮ
     this.input.on('pointermove', (p) => {
-        if(player && player.active && gameState === "playing") {
-            player.x = Phaser.Math.Clamp(p.x, 20, config.width - 20);
-            player.y = Phaser.Math.Clamp(p.y - 20, 20, config.height - 20);
+        if (player && player.active && gameState === "playing") {
+            player.x = Phaser.Math.Clamp(p.x, 25, config.width - 25);
+            player.y = Phaser.Math.Clamp(p.y - 25, 25, config.height - 25);
+            player.glow.setPosition(player.x, player.y);
         }
     });
-    
-    // === СТРЕЛЬБА ===
+
+    // ЦИКЛ АВТОСТРЕЛЬБЫ ИГРОКА
     this.time.addEvent({
-        delay: 300,
+        delay: 260,
         callback: fire,
         callbackScope: this,
         loop: true
     });
-    
-    // === СПАВН ВРАГОВ ===
+
+    // СПАВН ВРАГОВ
     this.spawnTimer = this.time.addEvent({
-        delay: 1000,
+        delay: 950,
         callback: () => {
-            if(!isBossActive && gameState === "playing") {
+            if (!isBossActive && gameState === "playing") {
                 spawnEnemy.call(this);
             }
         },
         loop: true
     });
-    
-    // === ТАЙМЕР БОССА ===
+
+    // ТАЙМЕР ВЫЗОВА БОССА (каждые 22 сек)
     this.bossTimer = this.time.addEvent({
-        delay: 20000,
+        delay: 22000,
         callback: prepareBoss,
         callbackScope: this,
         loop: true
     });
-    
-    // === КОЛЛИЗИИ ===
+
+    // КОЛЛИЗИИ
     this.physics.add.overlap(bullets, clouds, hitEnemy, null, this);
     this.physics.add.overlap(player, clouds, onPlayerHit, null, this);
+    this.physics.add.overlap(player, enemyBullets, onPlayerHitBullet, null, this);
     this.physics.add.overlap(player, bonuses, collectBonus, null, this);
-    
-    // === БАР БОССА ===
+
+    // ГРАФИКА ДЛЯ ПОЛОСКИ БОССА
     bossBar = this.add.graphics().setDepth(100);
 }
+// ============================================================================
+// 4.1 БОЕВЫЕ МЕХАНИКИ: КОМБО, УЛЬТА, СТРЕЛЬБА И СПАВН
+// ============================================================================
 
-// ============================================================================
-// GAMEPLAY
-// ============================================================================
+function addCombo() {
+    comboCount++;
+    comboMultiplier = Math.min(5, 1 + Math.floor(comboCount / 5));
+    if (comboText) {
+        comboText.setText('Комбо: x' + comboMultiplier);
+        comboText.setColor(comboMultiplier > 2 ? '#ff0055' : '#00ffcc');
+    }
+    clearTimeout(comboTimer);
+    comboTimer = setTimeout(() => {
+        comboCount = 0;
+        comboMultiplier = 1;
+        if (comboText) comboText.setText('Комбо: x1').setColor('#00ffcc');
+    }, 2500);
+}
+
+function addUltCharge(amount) {
+    ultCharge = Math.min(MAX_ULT, ultCharge + amount);
+    if (ultButton) {
+        ultButton.setText('ВСПЫШКА\n' + Math.floor(ultCharge) + '%');
+        ultButton.setStyle({ backgroundColor: ultCharge >= 100 ? '#ffaa00' : '#4a5568' });
+    }
+}
+
+function triggerUltimate() {
+    if (ultCharge < 100 || gameState !== 'playing') return;
+    ultCharge = 0;
+    addUltCharge(0);
+
+    playSFX(this, 'ult');
+    this.cameras.main.shake(250, 0.015);
+    this.cameras.main.flash(200, 255, 255, 200);
+
+    const wave = this.add.image(player.x, player.y, 'ult_wave').setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({
+        targets: wave,
+        scale: 8,
+        alpha: 0,
+        duration: 600,
+        onComplete: () => wave.destroy()
+    });
+
+    enemyBullets.clear(true, true);
+    clouds.children.each(enemy => {
+        if (enemy && enemy.active) {
+            enemy.hp -= 15;
+            if (enemy.hp <= 0) hitEnemy.call(this, { destroy: () => {}, active: true }, enemy);
+        }
+    });
+
+    if (boss && boss.active) {
+        boss.hp -= 20;
+        showBossDamageText.call(this, boss);
+    }
+}
 
 function updateLivesText() {
-    if(livesText) livesText.destroy();
+    if (livesText) livesText.destroy();
     let hearts = '';
-    for(let i=0; i<lives; i++) hearts += '💛';
+    for (let i = 0; i < lives; i++) hearts += '💛';
     livesText = this.add.text(20, 80, hearts, { fontSize: '24px' });
+}
+
+function updateDamageText() {
+    if (damageText) damageText.setText('Урон: ' + playerDamage);
+}
+
+function fire() {
+    if (gameState !== "playing" || !player.active) return;
+    playSFX(this, 'shoot');
+
+    let totalBullets = greenBulletsActive ? bulletMultiplier * 3 : bulletMultiplier;
+    const baseTexture = greenBulletsActive ? 'bullet' : (weaponLevel === 1 ? 'bullet' : 'bullet_double');
+
+    for (let i = 0; i < totalBullets; i++) {
+        const b = bullets.create(player.x, player.y - 20, baseTexture);
+        if (!b) continue;
+        b.setBlendMode(Phaser.BlendModes.ADD);
+        b.hasHit = false;
+        b.body.setSize(22, 32);
+
+        if (greenBulletsActive) {
+            b.setTint(0x00ff88);
+            const spreadAngle = 50;
+            const angle = ((i / Math.max(1, totalBullets - 1)) * spreadAngle - (spreadAngle / 2)) * (Math.PI / 180);
+            b.setVelocity(Math.sin(angle) * 650, -Math.cos(angle) * 650);
+        } else {
+            const spacing = 14;
+            b.x = player.x + (i - (totalBullets - 1) / 2) * spacing;
+            b.setVelocityY(-650);
+        }
+    }
 }
 
 function spawnEnemy() {
     const cfg = LEVEL_CONFIG[level];
-    if(!cfg || isBossActive) return;
-    
+    if (!cfg || isBossActive) return;
+
     const x = Phaser.Math.Between(40, config.width - 40);
     const enemy = clouds.create(x, -50, cfg.enemy);
-    
-    // Показ надписи нового врага
-    showNewEnemyText(this, cfg.enemy);
-    
-    if(enemy) {
-        // HP врага растёт с уровнем
-        enemy.hp = getEnemyHp(cfg.enemyHp);
-        
-        // Базовая скорость растёт с уровнем (множитель 1.1)
-        const baseSpeed = cfg.speed * Math.pow(1.1, level - 1);
-        // Рандомная скорость: 0.8 - 1.2 от базовой (каждое облако имеет свою скорость)
-        const randomFactor = Phaser.Math.FloatBetween(0.8, 1.2);
-        const speed = baseSpeed * randomFactor;
-        
-        enemy.setVelocityY(speed);
-        
-        // Отладка в консоль
-        //console.log('Облако ' + cfg.enemy + ': скорость=' + speed.toFixed(1) + ' (база=' + baseSpeed.toFixed(1) + ', рандом=' + randomFactor.toFixed(2) + ')');
-        
-        if(level >= 2) {
-            this.tweens.add({
-                targets: enemy,
-                x: enemy.x + Phaser.Math.Between(-100, 100),
-                duration: 1000,
-                yoyo: true,
-                repeat: -1
-            });
-        }
-    }
-}
+    if (!enemy) return;
 
-function fire() {
-    if(gameState !== "playing" || !player.active) return;
-    
-    playSFX(this, 'shoot');
-    
-    // Определяем количество и тип пуль
-    let totalBullets = bulletMultiplier;
-    let isGreenMode = greenBulletsActive;
-    
-    // Зелёный режим: x3 пуль
-    if(isGreenMode) {
-        totalBullets = bulletMultiplier * 3;
-    }
-    
-    // Создаём пули
-    if(isGreenMode) {
-        // ЗЕЛЁНЫЕ ПУЛИ: веером (влево и вправо)
-        const baseTexture = 'bullet';  // Остаётся та же форма
-        const spreadAngle = 60;  // Угол разброса
-        const centerX = totalBullets - 1;
-        
-        for(let i=0; i<totalBullets; i++) {
-            const b = bullets.create(player.x, player.y - 20, baseTexture);
-            if(b) {
-                // Tint в зелёный
-                b.setTint(0x00ff00);
-                // ← ЗАЩИТА ОТ ЗАВИСАНИЯ: флаг попадания
-                b.hasHit = false;
-                // Увеличенный хитбокс для лучшей коллизии
-                b.body.setSize(20, 35);
-                
-                // Угол для этой пули
-                const angle = ((i / centerX) * spreadAngle - (spreadAngle / 2)) * (Math.PI / 180);
-                
-                // Скорость с углом
-                const speed = 600;
-                b.setVelocity(
-                    Math.sin(angle) * speed,
-                    -Math.cos(angle) * speed
-                );
-            }
-        }
-    } else if(weaponLevel === 1) {
-        // Обычные пули: параллельно
-        const spacing = 15;
-        const startX = player.x - ((totalBullets - 1) * spacing) / 2;
-        
-        for(let i=0; i<totalBullets; i++) {
-            const b = bullets.create(startX + (i * spacing), player.y - 20, 'bullet');
-            if(b) {
-                b.setVelocityY(-600);
-                b.hasHit = false;  // ← ЗАЩИТА ОТ ЗАВИСАНИЯ
-                // Увеличенный хитбокс для лучшей коллизии
-                b.body.setSize(20, 35);
-            }
-        }
-    } else {
-        // Двойной выстрел: веер
-        const positions = [-150, -75, 0, 75, 150];
-        
-        for(let i=0; i<totalBullets; i++) {
-            const posIndex = i % positions.length;
-            const b = bullets.create(player.x, player.y - 20, 'bullet_double');
-            if(b) {
-                b.setVelocityY(-500);
-                b.setVelocityX(positions[posIndex]);
-                b.hasHit = false;  // ← ЗАЩИТА ОТ ЗАВИСАНИЯ
-                // Увеличенный хитбокс для лучшей коллизии
-                b.body.setSize(28, 28);
-            }
-        }
+    enemy.hp = getEnemyHp(cfg.enemyHp);
+    const speed = cfg.speed * Math.pow(1.08, level - 1) * Phaser.Math.FloatBetween(0.85, 1.15);
+    enemy.setVelocityY(speed);
+
+    if (level >= 2) {
+        this.tweens.add({
+            targets: enemy,
+            x: Phaser.Math.Clamp(enemy.x + Phaser.Math.Between(-80, 80), 40, config.width - 40),
+            duration: 900,
+            yoyo: true,
+            repeat: -1
+        });
     }
 }
+// ============================================================================
+// 4.2 ПОПАДАНИЯ, ЭФФЕКТЫ (SHAKE + HIT-FLASH) И БОНУСЫ
+// ============================================================================
 
 function hitEnemy(bullet, enemy) {
-    // ← ПРОВЕРКА №1: Если пуля уже попала - выходим (ЗАЩИТА ОТ ЗАВИСАНИЯ)
-    if(bullet.hasHit) return;
-    
-    // ← ПРОВЕРКА №2: Если объекты неактивны - выходим
-    if(!bullet.active || !enemy.active) return;
-    
-    // ← ПРОВЕРКА №3: Помечаем пулю как попавшую
+    if (bullet.hasHit || !bullet.active || !enemy.active) return;
     bullet.hasHit = true;
-    
-    // Сразу деактивируем пулю
     bullet.destroy();
-    
-    // Уменьшаем здоровье врага (с учётом урона игрока)
+
     enemy.hp -= playerDamage;
     playSFX(this, 'hit');
-    
-    // Надпись урона в правом верхнем углу врага
-    showDamageText.call(this, enemy.x + 20, enemy.y - 20, playerDamage);
-    
-    // Если враг уничтожен
-    if(enemy.hp <= 0) {
+    showDamageText.call(this, enemy.x + 15, enemy.y - 15, playerDamage);
+
+    // Hit-Flash эффект (белая вспышка при попадании)
+    enemy.setTintFill(0xffffff);
+    this.time.delayedCall(60, () => {
+        if (enemy && enemy.active) enemy.clearTint();
+    });
+
+    if (enemy.hp <= 0) {
         playSFX(this, 'enemy_death');
-        
-        // Сразу деактивируем врага (защита от повторных вызовов)
         enemy.disableBody(true, true);
-        
-        // Частицы
-        for(let i=0; i<5; i++) {
-            const p = this.add.circle(enemy.x, enemy.y, 4, 0x88ccff);
+
+        // Легкая встряска камеры
+        this.cameras.main.shake(80, 0.004);
+
+        // Заряд ульты и комбо
+        addUltCharge(4);
+        addCombo();
+
+        // Неоновые частицы взрыва
+        for (let i = 0; i < 6; i++) {
+            const p = this.add.circle(enemy.x, enemy.y, 4, 0x00ffff, 0.8).setBlendMode(Phaser.BlendModes.ADD);
             this.tweens.add({
                 targets: p,
-                x: p.x + Phaser.Math.Between(-100, 100),
-                y: p.y + Phaser.Math.Between(-100, 100),
+                x: p.x + Phaser.Math.Between(-60, 60),
+                y: p.y + Phaser.Math.Between(-60, 60),
                 alpha: 0,
-                duration: 500,
+                scale: 0.2,
+                duration: 400,
                 onComplete: () => p.destroy()
             });
         }
-        
-        // Бонусы (20% шанс, разные типы)
-        if(Math.random() < 0.2) {
-            const bonusType = Phaser.Math.Between(1, 4);
-            const bonusName = bonusType === 1 ? 'bonus_double' : 
-                              bonusType === 2 ? 'bonus_speed' : 
-                              bonusType === 3 ? 'bonus_damage' : 'bonus_heart';
-            const bonus = bonuses.create(enemy.x, enemy.y + 20, bonusName);
-            if(bonus) {
-                bonus.setVelocityY(80);
-                //console.log('Бонус создан:', bonusName, 'в точке', enemy.x, enemy.y);
+
+        // Спавн бонусов (22% шанс)
+        if (Math.random() < 0.22) {
+            const types = ['bonus_double', 'bonus_speed', 'bonus_damage', 'bonus_heart', 'bonus_shield'];
+            const bName = Phaser.Utils.Array.GetRandom(types);
+            const bonus = bonuses.create(enemy.x, enemy.y + 15, bName);
+            if (bonus) {
+                bonus.setVelocityY(90);
+                bonus.setBlendMode(Phaser.BlendModes.ADD);
             }
         }
-        
-        score += 10;
+
+        score += 10 * comboMultiplier;
         scoreText.setText('Очки: ' + score);
-        
-        if(score > bestScore) {
+        if (score > bestScore) {
             bestScore = score;
             bestScoreText.setText('🏆: ' + bestScore);
         }
-        
-    }
-}
-
-function updateDamageText() {
-    if(damageText) {
-        damageText.setText('Урон: ' + playerDamage);
     }
 }
 
 function collectBonus(player, bonus) {
-    const bonusType = bonus.texture.key;
-    
-    // ← Анимированная надпись (появляется на 0.5 сек)
-    const bonusText = this.add.text(player.x, player.y - 30, '', {
-        fontSize: '48px',
-        fill: '#ffffff',
-        fontWeight: 'bold',
-        stroke: '#000000',
-        strokeThickness: 6
+    const type = bonus.texture.key;
+    playSFX(this, 'powerup');
+
+    const txt = this.add.text(player.x, player.y - 30, '', {
+        fontSize: '32px', fill: '#ffff00', fontWeight: 'bold',
+        stroke: '#000000', strokeThickness: 5
     }).setOrigin(0.5).setDepth(200);
-    
-    if(bonusType === 'bonus_double') {
-        // ЗЕЛЁНЫЙ: x3 пуль на 7 сек (пули летят веером)
+
+    if (type === 'bonus_double') {
         greenBulletsActive = true;
-        playSFX(this, 'powerup');
-        bonusText.setText('x3 ПУЛИ!');
-        bonusText.setTint(0x00ff00);
+        txt.setText('x3 ПУЛИ!').setTint(0x00ff00);
         this.time.delayedCall(7000, () => { greenBulletsActive = false; });
-        //console.log('Зелёный бонус: x3 пули на 7 сек');
-    } else if(bonusType === 'bonus_speed') {
-        // ЖЁЛТЫЙ: кол-во пуль +1 (перманентно)
+    } else if (type === 'bonus_speed') {
         bulletMultiplier += 1;
-        playSFX(this, 'powerup');
         updateDamageText();
-        bonusText.setText('ПУЛИ +1!');
-        bonusText.setTint(0xffff00);
-        //console.log('Жёлтый бонус: множитель пуль стал', bulletMultiplier);
-    } else if(bonusType === 'bonus_damage') {
-        // ФИОЛЕТОВЫЙ: урон +1 (перманентно)
+        txt.setText('ПУЛИ +1!');
+    } else if (type === 'bonus_damage') {
         playerDamage += 1;
-        playSFX(this, 'powerup');
         updateDamageText();
-        //console.log('Урон изменён:', playerDamage);
-        bonusText.setText('УРОН +1!');
-        bonusText.setTint(0xff00ff);
-    } else if(bonusType === 'bonus_heart') {
-        // +1 жизнь
-        if(lives < 5) {
+        txt.setText('УРОН +1!').setTint(0xff00ff);
+    } else if (type === 'bonus_shield') {
+        isShieldActive = true;
+        txt.setText('ЩИТ!').setTint(0x00ffff);
+        if (!player.shieldSprite) {
+            player.shieldSprite = this.add.image(player.x, player.y, 'shield_fx').setBlendMode(Phaser.BlendModes.ADD);
+        }
+    } else if (type === 'bonus_heart') {
+        if (lives < 5) {
             lives++;
             updateLivesText.call(this);
-            playSFX(this, 'powerup');
-            bonusText.setText('+1 ЖИЗНЬ!');
-            bonusText.setTint(0xff0000);
-            //console.log('Сердечко: жизней стало', lives);
+            txt.setText('+1 ЖИЗНЬ!').setTint(0xff4444);
         } else {
-            score += 50;
+            score += 100;
             scoreText.setText('Очки: ' + score);
-            bonusText.setText('+50 ОЧКОВ!');
-            bonusText.setTint(0xff0000);
-            //console.log('Сердечко: +50 очков (жизни полные)');
+            txt.setText('+100 ОЧКОВ!');
         }
     }
-    
-    // Исчезновение надписи через 0.5 сек
+
     this.tweens.add({
-        targets: bonusText,
-        y: bonusText.y - 30,
+        targets: txt,
+        y: txt.y - 35,
         alpha: 0,
-        duration: 500,
-        onComplete: () => bonusText.destroy()
+        duration: 600,
+        onComplete: () => txt.destroy()
     });
-    
+
     bonus.destroy();
 }
 
-function onPlayerHit(player, enemy) {
-    if(isInvulnerable || gameState !== "playing") return;
-    
-    if(enemy.destroy) enemy.destroy();
-    
-    lives--;
-    updateLivesText.call(this);
-    
-    playSFX(this, 'hurt');
-    
-    if(tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-    
-    if(lives <= 0) {
-        // === GAME OVER ===
-        gameState = "gameover";
-        
-        // ОСТАНАВЛИВАЕМ игровые таймеры
-        if(this.spawnTimer) this.spawnTimer.remove();
-        if(this.bossTimer) this.bossTimer.remove();
-        
-        // Уничтожаем игровые объекты
-        bullets.clear(true, true);
-        clouds.clear(true, true);
-        bonuses.clear(true, true);
-        bossBar.clear();
-        if(boss) boss.destroy();
-        bgClouds.clear(true, true);
-        
-        // Показываем Game Over и включаем мелодию проигрыша (процедурный синтез)
-        playSFX(this, 'game_over');
-        
-        const gameOverText = this.add.text(config.width/2, config.height/2, 'GAME OVER', {
-            fontSize: '64px',
-            fill: '#ff0000',
-            fontWeight: 'bold',
-            stroke: '#000000',
-            strokeThickness: 6
-        }).setOrigin(0.5).setDepth(100);
-        
-        this.add.text(config.width/2, config.height/2 + 80, 'Счёт: ' + score, {
-            fontSize: '32px',
-            fill: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 4
-        }).setOrigin(0.5).setDepth(100);
-        
-        // Ждём 2 секунды, показываем надпись, потом очищаем всё
-        this.time.delayedCall(2000, () => {
-            // Теперь останавливаем всё
-            this.tweens.killAll();
-            this.time.removeAllEvents();
-            //this.cameras.main.stopZoom() // не существует в Phaser 3;
-            player.destroy();
-            
-            sendScoreAndClose();
-        });
-        
-        return;
-    } else {
-        isInvulnerable = true;
-        player.setTexture('sun_hurt');
-        
-        this.tweens.add({
-            targets: player,
-            alpha: 0.2,
-            duration: 100,
-            yoyo: true,
-            repeat: 10,
-            onComplete: () => {
-                player.alpha = 1;
-                player.setTexture('sun_normal');
-                isInvulnerable = false;
-            }
-        });
-    }
+function onPlayerHitBullet(player, bullet) {
+    bullet.destroy();
+    onPlayerHit.call(this, player, { destroy: () => {} });
 }
 
+function onPlayerHit(player, enemy) {
+    if (isInvulnerable || gameState !== "playing") return;
+
+    // Сброс комбо при получении урона
+    comboCount = 0;
+    comboMultiplier = 1;
+    if (comboText) comboText.setText('Комбо: x1').setColor('#00ffcc');
+
+    if (isShieldActive) {
+        isShieldActive = false;
+        if (player.shieldSprite) {
+            player.shieldSprite.destroy();
+            player.shieldSprite = null;
+        }
+        playSFX(this, 'hit');
+        this.cameras.main.shake(120, 0.008);
+        return;
+    }
+
+    if (enemy.destroy) enemy.destroy();
+    lives--;
+    updateLivesText.call(this);
+
+    playSFX(this, 'hurt');
+    this.cameras.main.shake(200, 0.015);
+
+    if (lives <= 0) {
+        triggerGameOver.call(this);
+        return;
+    }
+
+    isInvulnerable = true;
+    player.setTexture('sun_hurt');
+    this.tweens.add({
+        targets: player,
+        alpha: 0.3,
+        duration: 100,
+        yoyo: true,
+        repeat: 8,
+        onComplete: () => {
+            player.alpha = 1;
+            player.setTexture('sun_normal');
+            isInvulnerable = false;
+        }
+    });
+}
+// ============================================================================
+// 4.3 БОССЫ: ПОЯВЛЕНИЕ, АТАКИ, ПОЛОСКА HP И ПЕРЕХОД ПО УРОВНЯМ
+// ============================================================================
+
 function prepareBoss() {
-    if(isBossActive || gameState !== "playing" || level > 5) return;
-    
+    if (isBossActive || gameState !== "playing" || level > 5) return;
+
     isBossInvulnerable = true;
     this.time.delayedCall(2000, () => { isBossInvulnerable = false; });
-    
     isBossActive = true;
-    
-    // Враги НЕ исчезают - продолжают лететь пока не вылетят за экран или не будут убиты
-    
-    // === БОСС ПОЯВЛЯЕТСЯ ===
-    boss = this.physics.add.sprite(config.width/2, -100, 'boss' + level);
-    boss.setDisplaySize(100, 100);  // Визуальный размер меньше текстуры
-    boss.body.setSize(80, 80);  // Хитбокс ещё меньше для честного попадания
-    boss.body.setOffset(20, 20);  // Центрируем хитбокс
-    
-    // Босс неактивен и мигает пока показывается надпись (2 сек)
+
+    boss = this.physics.add.sprite(config.width / 2, -100, 'boss' + level);
+    boss.setDisplaySize(110, 110);
+    boss.body.setSize(80, 80);
     boss.alpha = 0.5;
-    boss.visible = true;
-    
-    // Мигание босса
+
     this.tweens.add({
         targets: boss,
         alpha: 0.2,
@@ -1195,68 +879,91 @@ function prepareBoss() {
         yoyo: true,
         repeat: 5
     });
-    
-    // Показ надписи босса (2 секунды)
+
     showBossText(this, level);
-    
-    // После надписи босс становится активным
+
     this.time.delayedCall(2000, () => {
+        if (!boss || !boss.active) return;
         boss.alpha = 1;
-        boss.maxHp = 20 + (level * 20);
+        boss.maxHp = 25 + (level * 25);
         boss.hp = boss.maxHp;
+
+        // Паттерн атак босса (залпы снарядов каждые 1.2 сек)
+        boss.shootTimer = this.time.addEvent({
+            delay: 1200,
+            callback: () => {
+                if (!boss || !boss.active || isBossInvulnerable || gameState !== 'playing') return;
+                const count = LEVEL_CONFIG[level].bossBullets || 2;
+                for (let i = 0; i < count; i++) {
+                    const eb = enemyBullets.create(boss.x, boss.y + 40, 'enemy_bullet');
+                    if (eb) {
+                        eb.setBlendMode(Phaser.BlendModes.ADD);
+                        const angle = ((i / Math.max(1, count - 1)) * 60 - 30) * (Math.PI / 180);
+                        eb.setVelocity(Math.sin(angle) * 260, Math.cos(angle) * 260);
+                    }
+                }
+            },
+            loop: true
+        });
     });
-    
+
     this.tweens.add({
         targets: boss,
         y: 150,
         duration: 2000,
         ease: 'Back.out'
     });
-    
+
     this.physics.add.overlap(player, boss, () => {
-        if(!isBossInvulnerable) onPlayerHit.call(this, player, {destroy:()=>{}});
+        if (!isBossInvulnerable) onPlayerHit.call(this, player, { destroy: () => {} });
     });
-    
+
     this.physics.add.overlap(bullets, boss, (bObj, bullet) => {
-        if(isBossInvulnerable) return;
-        
+        if (isBossInvulnerable) return;
+
         bullet.destroy();
-        bObj.hp--;
+        bObj.hp -= playerDamage;
         playSFX(this, 'hit');
-        
-        // Надпись урона боссу (с накоплением)
         showBossDamageText.call(this, boss);
-        
-        if(bObj.hp <= 0) {
+
+        // Hit-flash босса
+        bObj.setTintFill(0xffffff);
+        this.time.delayedCall(50, () => {
+            if (bObj && bObj.active) bObj.clearTint();
+        });
+
+        if (bObj.hp <= 0) {
+            if (bObj.shootTimer) bObj.shootTimer.remove();
             bObj.destroy();
             isBossActive = false;
             bossBar.clear();
-            
-            score += 1000;
+            enemyBullets.clear(true, true);
+
+            this.cameras.main.shake(300, 0.02);
+            score += 1000 * comboMultiplier;
             scoreText.setText('Очки: ' + score);
-            
-            if(lives < 5) {
+
+            if (lives < 5) {
                 lives++;
                 updateLivesText.call(this);
             }
-            
-            if(level < 5) {
+
+            if (level < 5) {
                 playSFX(this, 'boss_win');
                 level++;
                 levelText.setText('Уровень: ' + level);
                 this.cameras.main.setBackgroundColor(LEVEL_CONFIG[level].color);
-                
-                // ← СБРОС таймера босса (пауза 3 сек перед врагами)
-                if(this.bossTimer) {
+
+                if (this.bossTimer) {
                     this.bossTimer.remove();
                     this.bossTimer = this.time.addEvent({
-                        delay: 20000,  // 20 сек до следующего босса
+                        delay: 22000,
                         callback: prepareBoss,
                         callbackScope: this,
                         loop: true
                     });
                 }
-                
+
                 isBossActive = true;
                 this.time.delayedCall(3000, () => {
                     isBossActive = false;
@@ -1269,65 +976,88 @@ function prepareBoss() {
 }
 
 function updateBossBar() {
-    if(!boss || !boss.active || !bossBar) return;
-    
+    if (!boss || !boss.active || !bossBar) return;
     bossBar.clear();
-    
-    // Полоска здоровья по центру вверху (уменьшена для мобильных)
-    const barWidth = 112;
-    const barHeight = 12;
+
+    const barWidth = 140;
+    const barHeight = 10;
     const barX = (config.width / 2) - (barWidth / 2);
-    const barY = 20;
-    
-    // Фон полоски
-    bossBar.fillStyle(0x333333);
+    const barY = 22;
+
+    bossBar.fillStyle(0x1a202c, 0.8);
     bossBar.fillRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4);
-    
-    // Основная полоска (красная)
-    bossBar.fillStyle(0xff0000);
-    bossBar.fillRect(barX, barY, (boss.hp / boss.maxHp) * barWidth, barHeight);
-    
-    // Рамка (белая)
+
+    bossBar.fillStyle(0xe53e3e);
+    bossBar.fillRect(barX, barY, Math.max(0, (boss.hp / boss.maxHp) * barWidth), barHeight);
+
     bossBar.lineStyle(2, 0xffffff);
     bossBar.strokeRect(barX, barY, barWidth, barHeight);
-    
-    // Мигание босса при неуязвимости
-    if(isBossInvulnerable && boss) {
-        boss.alpha = 0.5 + Math.sin(Date.now() / 100) * 0.5;
-    } else if(boss) {
-        boss.alpha = 1;
-    }
 }
+// ============================================================================
+// 4.4 UPDATE, GAME OVER, ЭПИЧНЫЙ ФИНАЛ И ИНТЕРФЕЙС УРОНА
+// ============================================================================
 
-// ============================================================================
-// ENDING
-// ============================================================================
+function triggerGameOver() {
+    gameState = "gameover";
+
+    if (this.spawnTimer) this.spawnTimer.remove();
+    if (this.bossTimer) this.bossTimer.remove();
+    if (player.trailTimer) player.trailTimer.remove();
+    if (boss && boss.shootTimer) boss.shootTimer.remove();
+
+    bullets.clear(true, true);
+    enemyBullets.clear(true, true);
+    clouds.clear(true, true);
+    bonuses.clear(true, true);
+    bossBar.clear();
+    if (boss) boss.destroy();
+    if (player.glow) player.glow.destroy();
+    if (player.shieldSprite) player.shieldSprite.destroy();
+
+    playSFX(this, 'game_over');
+
+    this.add.text(config.width / 2, config.height / 2 - 20, 'GAME OVER', {
+        fontSize: '56px', fill: '#ff4444', fontWeight: 'bold',
+        stroke: '#000000', strokeThickness: 6
+    }).setOrigin(0.5).setDepth(100);
+
+    this.add.text(config.width / 2, config.height / 2 + 50, 'Счёт: ' + score, {
+        fontSize: '28px', fill: '#ffffff', stroke: '#000000', strokeThickness: 4
+    }).setOrigin(0.5).setDepth(100);
+
+    this.time.delayedCall(2000, () => {
+        this.tweens.killAll();
+        this.time.removeAllEvents();
+        if (player && player.active) player.destroy();
+        sendScoreAndClose();
+    });
+}
 
 function startEnding() {
     gameState = "ending";
-    
-    // ОСТАНАВЛИВАЕМ игровые таймеры (но не tweens!)
-    if(this.spawnTimer) this.spawnTimer.remove();
-    if(this.bossTimer) this.bossTimer.remove();
-    
+
+    if (this.spawnTimer) this.spawnTimer.remove();
+    if (this.bossTimer) this.bossTimer.remove();
+    if (player.trailTimer) player.trailTimer.remove();
+
     clouds.clear(true, true);
     bullets.clear(true, true);
-    bgClouds.clear(true, true);
+    enemyBullets.clear(true, true);
     bonuses.clear(true, true);
     bossBar.clear();
-    if(boss) boss.destroy();
-    
-    playSFX(this, 'boss5_win');
-    
+    if (boss) boss.destroy();
+    if (player.shieldSprite) player.shieldSprite.destroy();
+
+    playSFX(this, 'boss_win');
+
     player.setTexture('sun_happy');
-    player.setDisplaySize(40, 40);
-    
-    // Солнце летит в ЦЕНТР экрана
+    player.setDisplaySize(50, 50);
+
     this.tweens.add({
         targets: player,
-        x: config.width/2,
-        y: config.height/2,
-        scale: 3,
+        x: config.width / 2,
+        y: config.height / 2,
+        scale: 2.5,
         duration: 2000,
         onComplete: () => {
             showSpaceScene.call(this);
@@ -1337,318 +1067,148 @@ function startEnding() {
 
 function showSpaceScene() {
     this.cameras.main.setBackgroundColor('#000000');
-    
-    // СОЛНЦЕ СТРОГО ПО ЦЕНТРУ
-    player.x = config.width/2;
-    player.y = config.height/2;
-    player.setDepth(10);  // Солнце поверх планет
-    
-    // ПЛАНЕТЫ вокруг солнца (увеличены в 3 раза)
+    player.x = config.width / 2;
+    player.y = config.height / 2;
+    player.setDepth(10);
+
     const planets = [];
     const planetTextures = ['planet1', 'planet2', 'planet3', 'planet4', 'planet5'];
-    
-    for(let i=0; i<5; i++) {
+
+    for (let i = 0; i < 5; i++) {
         const angle = (i / 5) * Math.PI * 2;
-        const dist = 150 + (i * 40);  // Увеличил расстояние
+        const dist = 140 + (i * 35);
         const p = this.add.image(
-            config.width/2 + Math.cos(angle) * dist,
-            config.height/2 + Math.sin(angle) * dist,
+            config.width / 2 + Math.cos(angle) * dist,
+            config.height / 2 + Math.sin(angle) * dist,
             planetTextures[i]
-        ).setDisplaySize((60 - i*8) * 3, (60 - i*8) * 3);  // Увеличено в 3 раза
-        p.setDepth(5);  // Планеты под солнцем
+        ).setDisplaySize(45, 45).setDepth(5);
         planets.push(p);
     }
-    
+
     this.tweens.add({
         targets: planets,
         angle: 360,
         duration: 10000,
         repeat: -1
     });
-    
-    this.time.delayedCall(4000, () => {
-        this.cameras.main.zoomTo(0.1, 6000);
-        
-        // ГАЛАКТИКА из текстуры
-        const galaxy = this.add.image(config.width/2, config.height/2, 'galaxy')
-            .setDisplaySize(2000, 2000);
-        
-        this.time.delayedCall(6000, () => {
-            // Мелодия "Торжество зла" (процедурный синтез)
-            playSFX(this, 'evil_triumph');
-            
-            // ЧЁРНАЯ ДЫРА (из texture final_blackhole) - в 2 раза больше
-            const bh = this.add.image(config.width * 5, config.height/2, 'final_blackhole')
-                .setDisplaySize(2000, 2000)
-                .setDepth(100);
-            
+
+    this.time.delayedCall(3500, () => {
+        this.cameras.main.zoomTo(0.12, 5000);
+        this.add.image(config.width / 2, config.height / 2, 'galaxy').setDisplaySize(1800, 1800);
+
+        this.time.delayedCall(5000, () => {
+            const bh = this.add.image(config.width * 3, config.height / 2, 'final_blackhole')
+                .setDisplaySize(1600, 1600).setDepth(100);
+
             this.tweens.add({
                 targets: bh,
-                x: config.width/2,
-                duration: 5000,
+                x: config.width / 2,
+                duration: 4000,
                 ease: 'Power2'
             });
-            
-            // НАДПИСЬ (увеличена в 4 раза, две строки, ниже чёрной дыры)
-            this.time.delayedCall(5500, () => {
-                const finText = this.add.text(config.width/2, config.height/2 + 800, 
-                    'ПРОДОЛЖЕНИЕ\nСЛЕДУЕТ...', {
-                    fontSize: '192px',
-                    fill: '#ffffff',
-                    fontWeight: 'bold',
-                    stroke: '#ff00ff',
-                    strokeThickness: 12
+
+            this.time.delayedCall(4500, () => {
+                this.add.text(config.width / 2, config.height / 2 + 650, 'ПРОДОЛЖЕНИЕ\nСЛЕДУЕТ...', {
+                    fontSize: '140px', fill: '#ffffff', fontWeight: 'bold',
+                    stroke: '#ff00ff', strokeThickness: 10, align: 'center'
                 }).setOrigin(0.5).setDepth(102);
-                
-                this.time.delayedCall(1000, () => {
+
+                this.time.delayedCall(2000, () => {
                     sendScoreAndClose();
-                    
-                    // ОЧИСТКА: останавливаем всё после отправки счёта
-                    this.time.delayedCall(500, () => {
-                        this.tweens.killAll();
-                        this.time.removeAllEvents();
-                        //this.cameras.main.stopZoom() // не существует в Phaser 3;
-                        if(player && player.active) player.destroy();
-                    });
                 });
             });
         });
     });
 }
 
-// ============================================================================
-// TELEGRAM
-// ============================================================================
-
 function sendScoreAndClose() {
-    if(score > bestScore) {
+    if (score > bestScore) {
         bestScore = score;
         localStorage.setItem('bestScore', bestScore.toString());
     }
-    
-    if(tg.sendData) {
-        tg.sendData(score.toString());
-    }
-    
+    if (tg.sendData) tg.sendData(score.toString());
     setTimeout(() => { tg.close(); }, 1000);
 }
 
-// ============================================================================
-// UPDATE
-// ============================================================================
-
 function update() {
-    if(gameState !== "playing") return;
-    
-    // Фоновые облака: базовая скорость растёт с уровнем, у каждого облака свой рандом
-    const baseSpeed = 2 * Math.pow(1.1, level - 1);
+    if (gameState !== "playing") return;
+
+    if (player && player.active) {
+        if (player.glow) player.glow.setPosition(player.x, player.y);
+        if (player.shieldSprite) player.shieldSprite.setPosition(player.x, player.y);
+    }
+
     bgClouds.children.iterate(c => {
-        if(c) {
-            // У каждого облака своя скорость: 0.8 - 1.2 от базовой
-            // Используем уникальное свойство cloudSpeed для постоянного рандома
-            if(!c.cloudSpeed) {
-                c.cloudSpeed = baseSpeed * Phaser.Math.FloatBetween(0.8, 1.2);
-            }
-            c.y += c.cloudSpeed;
-            if(c.y > config.height) {
+        if (c) {
+            c.y += (1.5 * (c.parallaxSpeed || 1));
+            if (c.y > config.height + 50) {
                 c.y = -50;
                 c.x = Phaser.Math.Between(0, config.width);
-                c.cloudSpeed = baseSpeed * Phaser.Math.FloatBetween(0.8, 1.2);
             }
         }
     });
-    
+
     bullets.children.iterate(b => {
-        if(b && b.y < -100) b.destroy();  // Увеличил запас чтобы пуля долетала до босса
+        if (b && b.y < -50) b.destroy();
     });
-    
-    clouds.children.iterate(e => {
-        if(e && e.y > config.height + 50) e.destroy();
-    });
-    
-    // Очистка бонусов, улетевших за экран
-    bonuses.children.iterate(b => {
-        if(b && b.y > config.height + 50) b.destroy();
-    });
-    
-    if(isBossActive && boss && boss.active) {
-        updateBossBar();
-        boss.x = (config.width/2) + Math.sin(this.time.now/500) * (60 + level*15);
-        boss.y = 150 + Math.cos(this.time.now/800) * (40 + level*10);
-    }
-}
 
-// ============================================================================
-// LEVEL CONFIG
-// ============================================================================
-
-const LEVEL_CONFIG = {
-    1: { name: "Голубое небо", enemy: "cloud1", enemyHp: 1, speed: 200, color: "#4ea1d3" },
-    2: { name: "Грозовой фронт", enemy: "cloud2", enemyHp: 2, speed: 250, color: "#2c5f7f" },
-    3: { name: "Закат", enemy: "cloud3", enemyHp: 3, speed: 300, color: "#ff6b35" },
-    4: { name: "Стратосфера", enemy: "crystal", enemyHp: 6, speed: 400, color: "#3a3a5e" },
-    5: { name: "Орбита", enemy: "debris", enemyHp: 8, speed: 500, color: "#1a1a1a" }
-};
-
-// Функция для получения HP врага с учётом уровня
-function getEnemyHp(baseHp) {
-    return baseHp + Math.floor(level / 2);
-}
-
-// === НОВЫЙ КОД - НАДПИСИ ДЛЯ ВРАГОВ И БОССОВ ===
-
-// Переменные для отслеживания показанных врагов
-let shownEnemies = {};
-let shownBosses = {};
-
-// Функция показа надписи нового врага
-function showNewEnemyText(scene, enemyType) {
-    if(shownEnemies[enemyType]) return;
-    shownEnemies[enemyType] = true;
-    
-    const texts = {
-        'cloud1': 'Злое Облако',
-        'cloud2': 'Грозовая туча',
-        'cloud3': 'Перистые облака',
-        'crystal': 'Кристалл холода',
-        'debris': 'Техно-мусор'
-    };
-    
-    const name = texts[enemyType] || enemyType;
-    showAnimatedText(scene, 'НОВЫЙ ВРАГ:\n' + name, 0xff0000, 2000);
-}
-
-// Функция показа надписи босса
-function showBossText(scene, bossNum) {
-    if(shownBosses[bossNum]) return;
-    shownBosses[bossNum] = true;
-    
-    const texts = {
-        1: 'Взрывной ураган',
-        2: 'Штормовой Вихрь',
-        3: 'Затмение',
-        4: 'Ледяной Гигант',
-        5: 'Чёрная Дыра'
-    };
-    
-    const name = texts[bossNum] || 'Босс ' + bossNum;
-    // Длительность 2 секунды (в 2 раза дольше)
-    showAnimatedText(scene, 'БОСС:\n' + name, 0xff00ff, 2000);
-}
-
-// Функция показа накопленного урона
-function showDamageText(x, y, damage) {
-    // Инициализируем pendingDamage если нет
-    if(!this.pendingDamage) this.pendingDamage = {};
-    
-    // Создаём или обновляем накопитель урона
-    const key = 'dmg_' + Math.round(x) + '_' + Math.round(y);
-    
-    if(this.pendingDamage[key]) {
-        // Уже есть накопитель - добавляем урон
-        this.pendingDamage[key].damage += damage;
-        this.pendingDamage[key].timer = 0.15;  // Сброс таймера
-    } else {
-        // Новый накопитель
-        this.pendingDamage[key] = {
-            damage: damage,
-            timer: 0.15,
-            x: x,
-            y: y
-        };
-        
-        // Создаём текст
-        const dmgText = this.add.text(x, y, '-' + damage, {
-            fontSize: '24px',
-            fontWeight: 'bold',
-            color: '#ff0000',
-            stroke: '#ffffff',
-            strokeThickness: 3
-        }).setOrigin(0.5);
-        this.pendingDamage[key].text = dmgText;
-        
-        // Запускаем обновление
-        this.time.addEvent({
-            delay: 50,
-            callback: updateDamageTextKey,
-            callbackScope: this,
-            args: [key],
-            repeat: 10
-        });
-    }
-}
-
-// Обновление текста урона (для накопленного урона)
-function updateDamageTextKey(key) {
-    if(!this.pendingDamage) this.pendingDamage = {};
-    if(!this.pendingDamage[key]) return;
-    
-    const data = this.pendingDamage[key];
-    data.timer -= 0.05;
-    
-    // Обновляем текст
-    if(data.text && data.text.active) {
-        data.text.setText('-' + data.damage);
-        data.text.y -= 1;  // Медленно плывёт вверх
-    }
-    
-    // Время вышло - уничтожаем
-    if(data.timer <= 0) {
-        if(data.text) {
-            // Финальная анимация исчезновения
-            this.tweens.add({
-                targets: data.text,
-                alpha: 0,
-                y: data.text.y - 20,
-                duration: 200,
-                onComplete: () => {
-                    if(data.text) data.text.destroy();
-                }
-            });
+    enemyBullets.children.iterate(eb => {
+        if (eb && (eb.y > config.height + 50 || eb.y < -50 || eb.x < -50 || eb.x > config.width + 50)) {
+            eb.destroy();
         }
-        delete this.pendingDamage[key];
-        return true;  // Остановить повторения
+    });
+
+    clouds.children.iterate(e => {
+        if (e && e.y > config.height + 50) e.destroy();
+    });
+
+    bonuses.children.iterate(b => {
+        if (b && b.y > config.height + 50) b.destroy();
+    });
+
+    if (isBossActive && boss && boss.active) {
+        updateBossBar();
+        boss.x = (config.width / 2) + Math.sin(this.time.now / 600) * (50 + level * 12);
+        boss.y = 140 + Math.cos(this.time.now / 900) * (30 + level * 8);
     }
-    return false;  // Продолжить повторения
 }
 
-// Функция показа урона боссу
+function showBossText(scene, bossNum) {
+    const texts = { 1: 'Ураган', 2: 'Шторм', 3: 'Затмение', 4: 'Ледяной Гигант', 5: 'Чёрная Дыра' };
+    showAnimatedText(scene, 'БОСС:\n' + (texts[bossNum] || 'Босс ' + bossNum), 0xff00ff, 1800);
+}
+
+function showDamageText(x, y, damage) {
+    const dmgText = this.add.text(x, y, '-' + damage, {
+        fontSize: '20px', fontWeight: 'bold', fill: '#ff4444',
+        stroke: '#ffffff', strokeThickness: 3
+    }).setOrigin(0.5);
+
+    this.tweens.add({
+        targets: dmgText,
+        y: y - 25,
+        alpha: 0,
+        duration: 350,
+        onComplete: () => dmgText.destroy()
+    });
+}
+
 function showBossDamageText(bossObj) {
-    showDamageText.call(this, bossObj.x + 30, bossObj.y - 30, playerDamage);
+    showDamageText.call(this, bossObj.x + Phaser.Math.Between(-20, 20), bossObj.y - 20, playerDamage);
 }
 
-// Функция показа анимированной надписи
 function showAnimatedText(scene, text, color, duration) {
     const lines = text.split('\n');
-    const startY = config.height / 2 - (lines.length - 1) * 20;
-    
+    const startY = config.height / 2 - 30;
+
     lines.forEach((line, i) => {
-        const txt = scene.add.text(config.width / 2, startY + i * 40, line, {
-            fontSize: '28px',
-            fontWeight: 'bold',
-            color: '#' + color.toString(16).padStart(6, '0'),
-            stroke: '#ffffff',
-            strokeThickness: 4
-        }).setOrigin(0.5);
-        
-        txt.alpha = 0;
-        txt.scale = 0.5;
-        
-        scene.tweens.add({
-            targets: txt,
-            alpha: 1,
-            scale: 1.2,
-            duration: 300,
-            ease: 'Back.out'
-        });
-        
-        scene.tweens.add({
-            targets: txt,
-            alpha: 0,
-            scale: 0.8,
-            delay: duration - 500,
-            duration: 500,
-            onComplete: () => txt.destroy()
-        });
+        const txt = scene.add.text(config.width / 2, startY + i * 36, line, {
+            fontSize: '26px', fontWeight: 'bold',
+            fill: '#' + color.toString(16).padStart(6, '0'),
+            stroke: '#ffffff', strokeThickness: 4
+        }).setOrigin(0.5).setAlpha(0).setScale(0.6);
+
+        scene.tweens.add({ targets: txt, alpha: 1, scale: 1.1, duration: 250, ease: 'Back.out' });
+        scene.tweens.add({ targets: txt, alpha: 0, scale: 0.8, delay: duration - 400, duration: 400, onComplete: () => txt.destroy() });
     });
 }
