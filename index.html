@@ -77,7 +77,7 @@ function hap(kind, style) {
 }
 
 // ============================================================================
-// CONFIG — все числа и правила оригинала собраны здесь
+// CONFIG — все числа и правила игры собраны здесь
 // ============================================================================
 const CFG = {
   START_LIVES: 3, MAX_LIVES: 5,
@@ -85,7 +85,9 @@ const CFG = {
   BULLET_SPEED: 600, BULLET_SPACING: 15, GREEN_MS: 7000, GREEN_SPREAD: 60,
   DROP_CHANCE: 0.2, BONUS_FALL: 80,
   SCORE_KILL: 10, SCORE_BOSS: 1000, SCORE_HEART_FULL: 50,
-  BOSS_HP_BASE: 20, BOSS_HP_PER_LEVEL: 20, SPEED_GROWTH: 1.1,
+  BOSS_MIN_HP: [0, 65, 130, 220, 340, 500],
+  BOSS_VOLLEYS: [0, 26, 31, 36, 41, 46], // целевое число залпов для адаптивного ХП
+  SPEED_GROWTH: 1.1,
   LEVELS: {
     1: { name: 'Голубое небо',   enemy: 'cloud1',  enemyName: 'Злое Облако',     enemyHp: 1, speed: 200, color: '#4ea1d3',
          bg: [[0, '#9fdcf7'], [1, '#4ea1d3']],                    boss: 'Взрывной ураган', bossTint: 0xffe14a, cloudTint: 0xffffff, stars: 0,   glow: [0xffffff, 0.28] },
@@ -98,7 +100,6 @@ const CFG = {
     5: { name: 'Орбита',         enemy: 'debris',  enemyName: 'Техно-мусор',     enemyHp: 8, speed: 500, color: '#1a1a1a',
          bg: [[0, '#020208'], [0.7, '#15101f'], [1, '#2b1740']],  boss: 'Чёрная Дыра',     bossTint: 0xff55ff, cloudTint: 0x9090b0, stars: 1,   glow: [0x8a22b8, 0.4] }
   },
-  // размеры хитбоксов врагов (как у оригинальных текстур)
   SIZES: { cloud1: [80, 60], cloud2: [80, 75], cloud3: [100, 50], crystal: [70, 70], debris: [70, 70] }
 };
 const baseBpm = (lv) => 108 + lv * 6;
@@ -114,7 +115,6 @@ const hex = (c) => '#' + c.toString(16).padStart(6, '0');
 const rnd = (seed) => { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
 const ov = (a, b) => Math.abs(a.x - b.x) < a.hw + b.hw && Math.abs(a.y - b.y) < a.hh + b.hh;
 
-let bestScore = parseInt(lsGet('bestScore') || '0', 10) || 0;
 let sent = false;
 let sceneRef = null;
 
@@ -126,13 +126,11 @@ const TOP = 10 + SAFE_TOP;
 const TS = 2; // масштаб процедурных текстур
 
 // ============================================================================
-// ПЕРЕДАЧА ОЧКОВ В ТЕЛЕГРАМ (логика оригинала)
+// ПЕРЕДАЧА ОЧКОВ В ТЕЛЕГРАМ
 // ============================================================================
 function sendScoreAndClose() {
   if (sent) return; sent = true;
   const score = sceneRef ? sceneRef.score : 0;
-  if (score > bestScore) { bestScore = score; }
-  lsSet('bestScore', String(bestScore));
   try { if (tg.sendData) tg.sendData(String(score)); } catch (e) {}
   setTimeout(() => { try { tg.close(); } catch (e) {} }, 1000);
 }
@@ -217,6 +215,7 @@ const SFX = {
   shoot() { const f = 640 + Math.random() * 120; T({ f, f2: 150, d: 0.1, type: 'triangle', v: 0.05 }); T({ f: f * 1.9, f2: 300, d: 0.05, type: 'square', v: 0.012 }); },
   hit() { N({ d: 0.06, type: 'bandpass', f: 1700, q: 1.2, v: 0.07 }); T({ f: 340, f2: 110, d: 0.09, type: 'sine', v: 0.08 }); },
   enemy_death() { N({ d: 0.28, type: 'lowpass', f: 2600, f2: 200, v: 0.14 }); T({ f: 240, f2: 55, d: 0.26, type: 'triangle', v: 0.13 }); T({ f: 900, f2: 300, d: 0.1, type: 'square', v: 0.02 }); },
+  boss_shot() { T({ f: 310, f2: 110, d: 0.18, type: 'sawtooth', v: 0.045, lp: 1200 }); N({ d: 0.1, type: 'bandpass', f: 1100, q: 1.4, v: 0.04 }); },
   pow_green() { arp([523, 659, 784, 1047, 1319], 0.05, 'triangle', 0.07, 1); },
   pow_yellow() { arp([440, 554, 659, 880], 0.055, 'square', 0.04, 1); },
   pow_purple() { arp([330, 415, 494, 659, 988], 0.05, 'sawtooth', 0.035, 1); T({ f: 110, f2: 220, d: 0.3, type: 'sine', v: 0.1 }); },
@@ -536,6 +535,40 @@ function buildTextures(sc) {
   mk(sc, 'boss5', 120, 120, (x) => drawBH(x, 120));
   mk(sc, 'final_blackhole', 250, 250, (x) => drawBH(x, 250));
 
+  // ---- Снаряды боссов ----
+  mk(sc, 'bproj_bolt', 30, 30, (x) => {
+    glowDot(x, 15, 15, 15, '255,215,40', 0.85);
+    disc(x, 15, 15, 9, '#ffae00'); disc(x, 15, 15, 6, '#ffffd0');
+    x.strokeStyle = '#ffffff'; x.lineWidth = 2;
+    x.beginPath(); x.moveTo(6, 15); x.lineTo(12, 10); x.lineTo(18, 19); x.lineTo(24, 14); x.stroke();
+  });
+  mk(sc, 'bproj_spark', 22, 22, (x) => {
+    glowDot(x, 11, 11, 11, '255,210,40', 0.8);
+    disc(x, 11, 11, 6, '#ff9a00'); disc(x, 11, 11, 3.8, '#ffffff');
+  });
+  mk(sc, 'bproj_wind', 26, 26, (x) => {
+    glowDot(x, 13, 13, 13, '130,215,255', 0.75);
+    disc(x, 13, 13, 7, '#3ab8ff'); disc(x, 13, 13, 4, '#ffffff');
+    x.strokeStyle = 'rgba(255,255,255,.9)'; x.lineWidth = 2;
+    x.beginPath(); x.arc(13, 13, 9, 0.2, 2.3); x.stroke();
+    x.beginPath(); x.arc(13, 13, 9, 3.3, 5.4); x.stroke();
+  });
+  mk(sc, 'bproj_eclipse', 26, 26, (x) => {
+    glowDot(x, 13, 13, 13, '255,110,20', 0.85);
+    disc(x, 13, 13, 8.5, '#ff6a00'); disc(x, 13, 13, 6, '#180824');
+    x.strokeStyle = '#ffe070'; x.lineWidth = 1.6; x.beginPath(); x.arc(13, 13, 6.5, 0, TAU); x.stroke();
+  });
+  mk(sc, 'bproj_ice', 22, 32, (x) => {
+    glowDot(x, 11, 16, 11, '80,230,255', 0.7);
+    poly(x, [[11, 29], [4, 13], [11, 3], [18, 13]], LG(x, 4, 3, 18, 29, [[0, '#ffffff'], [0.5, '#6be8ff'], [1, '#0c7cd5']]));
+    line(x, [[11, 29], [4, 13], [11, 3], [18, 13]], 1.4, '#ffffff', true);
+  });
+  mk(sc, 'bproj_void', 26, 26, (x) => {
+    glowDot(x, 13, 13, 13, '230,50,255', 0.85);
+    disc(x, 13, 13, 7.5, '#d42aff'); disc(x, 13, 13, 5, '#07000c');
+    x.strokeStyle = '#ff9eff'; x.lineWidth = 1.5; x.beginPath(); x.arc(13, 13, 5.8, 0, TAU); x.stroke();
+  });
+
   // ---- Пули ----
   const bullet = (key, core, mid, rgb) => mk(sc, key, 24, 40, (x) => {
     x.fillStyle = LG(x, 0, 40, 0, 12, [[0, `rgba(${rgb},0)`], [1, mid]]);
@@ -631,7 +664,7 @@ class GameScene extends Phaser.Scene {
     o = o || {};
     const t = this.add.text(x, y, s, {
       fontFamily: FONT, fontSize: size + 'px', fontStyle: 'bold', color: color || '#fff',
-      stroke: o.stroke || '#0a1626', strokeThickness: o.st == null ? 3 : o.st, align: o.align || 'left', resolution: o.res || D
+      stroke: o.stroke || '#0a1626', strokeThickness: o.st == null ? 4 : o.st, align: o.align || 'left', resolution: o.res || D
     });
     const org = o.o || [0, 0]; t.setOrigin(org[0], org[1]); t.setDepth(o.depth || 100);
     return t;
@@ -647,9 +680,10 @@ class GameScene extends Phaser.Scene {
 
     Object.assign(this, {
       gs: 'playing', score: 0, shownScore: 0, scoreBump: 0, level: 1, lives: CFG.START_LIVES, dmg: 1, mult: 1,
-      greenUntil: 0, invuln: false, bossActive: false, bossInv: false, boss: null, bullets: [], enemies: [], bonuses: [],
-      t: 0, pulse: 0, warned: false, slowUntil: 0, shownEnemies: {}, shownBosses: {}, sunTex: 'sun_normal',
-      tx: W / 2, ty: H - 100, startBest: bestScore, newRecord: false, bossTrail: 0, orbit: null
+      greenUntil: 0, invuln: false, bossActive: false, bossInv: false, boss: null,
+      bullets: [], enemies: [], bonuses: [], bossBullets: [],
+      t: 0, pulse: 0, warned: false, slowUntil: 0, pullUntil: 0, shownEnemies: {}, shownBosses: {}, sunTex: 'sun_normal',
+      tx: W / 2, ty: H - 100, bossTrail: 0, orbit: null
     });
 
     this.buildBackground();
@@ -657,11 +691,17 @@ class GameScene extends Phaser.Scene {
     this.buildPlayer();
     this.buildHUD();
 
-    // ---- управление ----
-    const move = (p) => { if (this.gs === 'playing') { this.tx = Phaser.Math.Clamp(p.x / D, 20, W - 20); this.ty = Phaser.Math.Clamp(p.y / D - 20, 20, H - 20); } };
+    // ---- управление (игнорируем клики по кнопкам звука и выхода) ----
+    const move = (p) => {
+      if (p.event && p.event.target && p.event.target.closest && p.event.target.closest('.gbtn, #dlg')) return;
+      if (this.gs === 'playing') {
+        this.tx = Phaser.Math.Clamp(p.x / D, 20, W - 20);
+        this.ty = Phaser.Math.Clamp(p.y / D - 20, 20, H - 20);
+      }
+    };
     this.input.on('pointermove', move); this.input.on('pointerdown', move);
 
-    // ---- таймеры (значения оригинала) ----
+    // ---- таймеры ----
     this.fireTimer = this.time.addEvent({ delay: CFG.FIRE_MS, callback: this.fire, callbackScope: this, loop: true });
     this.spawnTimer = this.time.addEvent({ delay: CFG.SPAWN_MS, callback: () => { if (!this.bossActive && this.gs === 'playing') this.spawnEnemy(); }, loop: true });
     this.bossTimer = this.time.addEvent({ delay: CFG.BOSS_MS, callback: this.prepareBoss, callbackScope: this, loop: true });
@@ -690,6 +730,7 @@ class GameScene extends Phaser.Scene {
     }).setDepth(-13);
     this.vigRed = this.add.image(W / 2, H / 2, 'vig').setDisplaySize(W, H).setTint(0xff2020).setAlpha(0).setDepth(90);
     this.vigWarn = this.add.image(W / 2, H / 2, 'vig').setDisplaySize(W, H).setTint(0xff3030).setAlpha(0).setDepth(89);
+    this.vigDark = this.add.image(W / 2, H / 2, 'vig').setDisplaySize(W, H).setTint(0x080014).setAlpha(0).setDepth(88);
   }
 
   setLevelBG(lv, instant) {
@@ -752,7 +793,7 @@ class GameScene extends Phaser.Scene {
   banner(kind, name, color, yFrac) {
     const W = this.W, c = this.add.container(W / 2, this.H * (yFrac || 0.36)).setDepth(120);
     const g = this.add.graphics(); g.fillStyle(0x000000, 0.5); g.fillRect(-W / 2, -46, W, 92); g.fillStyle(color, 0.95); g.fillRect(-W / 2, -46, W, 2); g.fillRect(-W / 2, 44, W, 2);
-    const t1 = this.txt(0, -22, kind, 14, hex(color), { o: [0.5, 0.5], st: 0 });
+    const t1 = this.txt(0, -22, kind, 14, hex(color), { o: [0.5, 0.5], st: 3 });
     const t2 = this.txt(0, 8, name, W < 340 ? 24 : 30, '#ffffff', { o: [0.5, 0.5], st: 5, stroke: hex(color) });
     c.add([g, t1, t2]); c.setScale(1, 0.1).setAlpha(0);
     this.tweens.add({ targets: c, scaleY: 1, alpha: 1, duration: 220, ease: 'Back.out' });
@@ -790,43 +831,45 @@ class GameScene extends Phaser.Scene {
   }
   setSunTex(key) { this.sunTex = key; this.player.setTexture(key); }
 
-  // ------------------------------------------------------------------ HUD
+  // ------------------------------------------------------------------ HUD (без фоновых плашек, с чётким контуром)
   buildHUD() {
     const W = this.W, hud = this.hudObjs = [];
-    const g = this.add.graphics().setDepth(100); hud.push(g);
-    const panel = (x, y, w, h) => { g.fillStyle(0x08162b, 0.42); g.fillRoundedRect(x, y, w, h, 12); g.lineStyle(1.5, 0xffffff, 0.26); g.strokeRoundedRect(x, y, w, h, 12); };
-    const LX = 12, RW = 104, RX = W - 12 - RW;
-    panel(LX, TOP, 132, 50); panel(RX, TOP, RW, 50); panel(LX, TOP + 58, 132, 22); panel(RX, TOP + 58, RW, 22); panel(RX, TOP + 84, RW, 22);
+    const LX = 12, RX = W - 12;
     const T_ = (x, y, s, size, col, o) => { const t = this.txt(x, y, s, size, col, o); hud.push(t); return t; };
-    T_(LX + 12, TOP + 10, 'ОЧКИ', 10, '#ffe9a8', { st: 0, o: [0, 0.5] });
-    this.scoreTxt = T_(LX + 12, TOP + 31, '0', 24, '#ffffff', { o: [0, 0.5] });
-    T_(RX + RW - 12, TOP + 10, 'РЕКОРД', 10, '#ffe9a8', { st: 0, o: [1, 0.5] });
-    this.bestTxt = T_(RX + RW - 12, TOP + 31, String(bestScore), 22, '#ffd34a', { o: [1, 0.5] });
-    this.levelTxt = T_(LX + 66, TOP + 69, 'УРОВЕНЬ 1', 12, '#ffff7a', { st: 0, o: [0.5, 0.5] });
-    this.dmgTxt = T_(RX + RW / 2, TOP + 69, 'УРОН 1', 12, '#ffa04a', { st: 0, o: [0.5, 0.5] });
-    this.multTxt = T_(RX + RW / 2, TOP + 95, 'ПУЛИ ×1', 12, '#8fe8ff', { st: 0, o: [0.5, 0.5] });
+
+    // Левый блок: Очки, Уровень, Жизни
+    T_(LX, TOP + 6, 'ОЧКИ', 11, '#ffe9a8', { st: 3.5, o: [0, 0.5] });
+    this.scoreTxt = T_(LX, TOP + 26, '0', 24, '#ffffff', { st: 4.5, o: [0, 0.5] });
+    this.levelTxt = T_(LX, TOP + 48, 'УРОВЕНЬ 1', 12, '#ffff7a', { st: 3.5, o: [0, 0.5] });
+
     this.hearts = [];
     for (let i = 0; i < CFG.MAX_LIVES; i++) {
-      const hx = LX + 13 + i * 25, hy = TOP + 100;
-      const e = this.add.image(hx, hy, 'heart_empty').setDepth(100).setScale(24 / (28 * TS)); hud.push(e);
-      const f = this.add.image(hx, hy, 'heart_full').setDepth(101).setScale(24 / (28 * TS)); f.setVisible(i < this.lives); hud.push(f);
+      const hx = LX + 10 + i * 22, hy = TOP + 69;
+      const e = this.add.image(hx, hy, 'heart_empty').setDepth(100).setScale(21 / (28 * TS)); hud.push(e);
+      const f = this.add.image(hx, hy, 'heart_full').setDepth(101).setScale(21 / (28 * TS)); f.setVisible(i < this.lives); hud.push(f);
       this.hearts.push(f);
     }
-    this.greenTxt = T_(RX + RW / 2, TOP + 121, 'ТРОЙНОЙ ОГОНЬ', 10, '#9bff9b', { st: 0, o: [0.5, 0.5] }).setVisible(false);
-    this.bossNameTxt = T_(W / 2, TOP + 134, '', 13, '#ffffff', { o: [0.5, 0.5], st: 3 }).setVisible(false);
+
+    // Правый блок: Урон, Пули, Тройной огонь
+    this.dmgTxt = T_(RX, TOP + 10, 'УРОН 1', 13, '#ffa04a', { st: 3.5, o: [1, 0.5] });
+    this.multTxt = T_(RX, TOP + 30, 'ПУЛИ ×1', 13, '#8fe8ff', { st: 3.5, o: [1, 0.5] });
+    this.greenTxt = T_(RX, TOP + 50, 'ТРОЙНОЙ ОГОНЬ', 11, '#9bff9b', { st: 3.5, o: [1, 0.5] }).setVisible(false);
+
+    // Верхний центр: Имя босса и полоска его ХП
+    this.bossNameTxt = T_(W / 2, TOP + 8, '', 12, '#ffffff', { o: [0.5, 0.5], st: 4 }).setVisible(false);
     this.hudDyn = this.add.graphics().setDepth(101); hud.push(this.hudDyn);
   }
-  updateLives(gain) {
+  updateLives() {
     this.hearts.forEach((h, i) => {
       const was = h.visible, now = i < this.lives;
       h.setVisible(now);
-      if (now && !was) { h.setScale(0.01); this.tweens.add({ targets: h, scale: 24 / (28 * TS), duration: 380, ease: 'Back.out' }); }
+      if (now && !was) { h.setScale(0.01); this.tweens.add({ targets: h, scale: 21 / (28 * TS), duration: 380, ease: 'Back.out' }); }
       if (!now && was) { const gh = this.add.image(h.x, h.y, 'heart_full').setScale(h.scaleX).setDepth(102); this.tweens.add({ targets: gh, y: h.y - 22, alpha: 0, scale: h.scaleX * 1.6, duration: 450, onComplete: () => gh.destroy() }); }
     });
   }
   addScore(n) {
-    this.score += n; this.scoreBump = 1;
-    if (this.score > bestScore) { bestScore = this.score; this.bestTxt.setText(String(bestScore)); this.newRecord = true; lsSet('bestScore', String(bestScore)); }
+    this.score += n;
+    this.scoreBump = 1;
   }
   updateHUD(dt) {
     if (this.shownScore < this.score) {
@@ -836,31 +879,37 @@ class GameScene extends Phaser.Scene {
     this.scoreBump = Math.max(0, this.scoreBump - dt * 4); this.scoreTxt.setScale(1 + this.scoreBump * 0.22);
     const g = this.hudDyn, W = this.W; g.clear();
     if (this.gs !== 'playing') { this.greenTxt.setVisible(false); this.bossNameTxt.setVisible(false); return; }
-    // индикатор до босса
+
+    // тонкий индикатор до появления босса на самом верху
     if (!this.bossActive && this.bossTimer) {
       const f = Phaser.Math.Clamp(1 - this.bossTimer.getRemaining() / CFG.BOSS_MS, 0, 1);
-      g.fillStyle(0xffffff, 0.12); g.fillRect(0, SAFE_TOP, W, 3);
+      g.fillStyle(0xffffff, 0.14); g.fillRect(0, SAFE_TOP, W, 3);
       g.fillStyle(this.warned ? 0xff4a4a : 0xb98cff, 0.95); g.fillRect(0, SAFE_TOP, W * f, 3);
     }
-    // зелёный бонус
+
+    // полоска таймера зелёного бонуса под надписью «ТРОЙНОЙ ОГОНЬ»
     const left = this.greenUntil - this.time.now;
     if (left > 0) {
-      const RW = 104, RX = W - 12 - RW, y = TOP + 110;
-      g.fillStyle(0x08162b, 0.42); g.fillRoundedRect(RX, y, RW, 22, 11); g.lineStyle(1.5, 0x6dff7a, 0.7); g.strokeRoundedRect(RX, y, RW, 22, 11);
-      g.fillStyle(0x2fd04a, 0.55); g.fillRoundedRect(RX + 2, y + 2, Math.max(8, (RW - 4) * left / CFG.GREEN_MS), 18, 9);
+      const gw = 88, gx = W - 12 - gw, gy = TOP + 61, gh = 6;
+      g.fillStyle(0x0a1626, 0.75); g.fillRoundedRect(gx - 1, gy - 1, gw + 2, gh + 2, 4);
+      g.fillStyle(0x46f05a, 0.95); g.fillRoundedRect(gx, gy, Math.max(4, gw * (left / CFG.GREEN_MS)), gh, 3);
       this.greenTxt.setVisible(true);
     } else this.greenTxt.setVisible(false);
-    // босс
+
+    // имя босса и полоска ХП на самом верху по центру
     const b = this.boss;
     if (b) {
-      const bw = Math.min(280, W - 60), bx = W / 2 - bw / 2, by = TOP + 148, bh = 14;
+      const bw = Math.min(190, W - 164), bx = W / 2 - bw / 2, by = TOP + 20, bh = 10;
       this.bossNameTxt.setVisible(true).setText(CFG.LEVELS[this.level].boss.toUpperCase());
       this.bossTrail = Math.max(b.hp, this.bossTrail - b.maxHp * dt * 0.5);
-      g.fillStyle(0x000000, 0.55); g.fillRoundedRect(bx - 3, by - 3, bw + 6, bh + 6, 8);
-      g.fillStyle(0xffffff, 0.85); g.fillRoundedRect(bx, by, Math.max(0, bw * this.bossTrail / b.maxHp), bh, 6);
+      g.fillStyle(0x0a1626, 0.75); g.fillRoundedRect(bx - 2, by - 2, bw + 4, bh + 4, 6);
+      g.fillStyle(0xffffff, 0.85); g.fillRoundedRect(bx, by, Math.max(0, bw * this.bossTrail / b.maxHp), bh, 4);
       const w = Math.max(0, bw * b.hp / b.maxHp);
-      if (w > 1) { g.fillStyle(0xe01818, 1); g.fillRoundedRect(bx, by, w, bh, 6); g.fillStyle(0xff6a5a, 0.85); g.fillRoundedRect(bx, by, w, bh * 0.45, 6); }
-      g.lineStyle(2, 0xffffff, 0.9); g.strokeRoundedRect(bx, by, bw, bh, 6);
+      if (w > 1) {
+        g.fillStyle(0xe01818, 1); g.fillRoundedRect(bx, by, w, bh, 4);
+        g.fillStyle(0xff6a5a, 0.85); g.fillRoundedRect(bx, by, w, bh * 0.45, 4);
+      }
+      g.lineStyle(1.5, 0xffffff, 0.9); g.strokeRoundedRect(bx, by, bw, bh, 4);
     } else this.bossNameTxt.setVisible(false);
   }
 
@@ -877,13 +926,17 @@ class GameScene extends Phaser.Scene {
     e.kind = cfg.enemy; e.hw = sz[0] / 2; e.hh = sz[1] / 2; e.ph = Math.random() * TAU;
     e.hp = cfg.enemyHp + Math.floor(this.level / 2);
     e.vy = cfg.speed * Math.pow(CFG.SPEED_GROWTH, this.level - 1) * Phaser.Math.FloatBetween(0.8, 1.2);
-    if (this.level >= 2) this.tweens.add({ targets: e, x: e.x + Phaser.Math.Between(-100, 100), duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    if (this.level >= 2) {
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      const targetX = Phaser.Math.Clamp(e.x + dir * Phaser.Math.Between(50, 100), 40, this.W - 40);
+      this.tweens.add({ targets: e, x: targetX, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
     this.enemies.push(e);
     this.announceEnemy(cfg.enemy, cfg.enemyName);
   }
-  makeBullet(x, y, vx, vy, tex) {
+  makeBullet(x, y, vx, vy, tex, isGreen) {
     const b = this.add.image(x, y, tex).setScale(1 / TS).setDepth(3);
-    b.vx = vx; b.vy = vy; b.hw = 10; b.hh = 17.5; b.rotation = Math.atan2(vx, -vy);
+    b.vx = vx; b.vy = vy; b.hw = 10; b.hh = 17.5; b.isGreen = !!isGreen; b.rotation = Math.atan2(vx, -vy);
     this.bullets.push(b);
   }
   fire() {
@@ -896,16 +949,23 @@ class GameScene extends Phaser.Scene {
       const total = this.mult * 3, spread = CFG.GREEN_SPREAD, cx = total - 1;
       for (let i = 0; i < total; i++) {
         const a = ((i / cx) * spread - spread / 2) * Math.PI / 180;
-        this.makeBullet(p.x, p.y - 20, Math.sin(a) * CFG.BULLET_SPEED, -Math.cos(a) * CFG.BULLET_SPEED, 'bullet_g');
+        this.makeBullet(p.x, p.y - 20, Math.sin(a) * CFG.BULLET_SPEED, -Math.cos(a) * CFG.BULLET_SPEED, 'bullet_g', true);
       }
     } else {
       const total = this.mult, sx = p.x - ((total - 1) * CFG.BULLET_SPACING) / 2;
-      for (let i = 0; i < total; i++) this.makeBullet(sx + i * CFG.BULLET_SPACING, p.y - 20, 0, -CFG.BULLET_SPEED, 'bullet');
+      for (let i = 0; i < total; i++) this.makeBullet(sx + i * CFG.BULLET_SPACING, p.y - 20, 0, -CFG.BULLET_SPEED, 'bullet', false);
     }
   }
 
   // ------------------------------------------------------------------ COMBAT
-  flash(o) { o.setTintFill(0xffffff); this.time.delayedCall(60, () => { if (o.active) o.clearTint(); }); }
+  flash(o) {
+    if (o._flashing) return;
+    o._flashing = true;
+    o.setTintFill(0xffffff);
+    this.time.delayedCall(35, () => {
+      if (o.active) { o.clearTint(); o._flashing = false; }
+    });
+  }
   hitEnemy(e, b) {
     e.hp -= this.dmg;
     Aud.play('hit'); this.flash(e);
@@ -940,7 +1000,7 @@ class GameScene extends Phaser.Scene {
     else if (k === 'bonus_speed') { this.mult += 1; this.multTxt.setText('ПУЛИ ×' + this.mult); label = 'ПУЛИ +1!'; col = '#ffee55'; sfx = 'pow_yellow'; }
     else if (k === 'bonus_damage') { this.dmg += 1; this.dmgTxt.setText('УРОН ' + this.dmg); label = 'УРОН +1!'; col = '#ff77ff'; sfx = 'pow_purple'; fx = 'purple'; }
     else {
-      if (this.lives < CFG.MAX_LIVES) { this.lives++; this.updateLives(true); label = '+1 ЖИЗНЬ!'; sfx = 'pow_heart'; }
+      if (this.lives < CFG.MAX_LIVES) { this.lives++; this.updateLives(); label = '+1 ЖИЗНЬ!'; sfx = 'pow_heart'; }
       else { this.addScore(CFG.SCORE_HEART_FULL); label = '+50 ОЧКОВ!'; sfx = 'pow_heart'; }
       col = '#ff6a6a'; fx = 'red';
     }
@@ -953,7 +1013,7 @@ class GameScene extends Phaser.Scene {
   onPlayerHit(src) {
     if (this.invuln || this.gs !== 'playing') return;
     if (src) { this.burst('puff', src.x, src.y, 10); this.removeEnemy(src); }
-    this.lives--; this.updateLives(false);
+    this.lives--; this.updateLives();
     Aud.play('hurt'); hap('notificationOccurred', 'error');
     this.shake(260, 0.014); this.flashVig(this.vigRed, 0.75, 500);
     this.burst('boom', this.player.x, this.player.y, 14);
@@ -965,10 +1025,17 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  clearBossBullets() {
+    this.bossBullets.forEach((b) => b.destroy());
+    this.bossBullets = [];
+    this.pullUntil = 0;
+  }
+
   clearEntities() {
     this.bullets.forEach((b) => b.destroy()); this.bullets = [];
     this.enemies.forEach((e) => { this.tweens.killTweensOf(e); e.destroy(); }); this.enemies = [];
     this.bonuses.forEach((b) => { if (b.ring) b.ring.destroy(); b.destroy(); }); this.bonuses = [];
+    this.clearBossBullets();
     this.destroyBoss();
   }
   destroyBoss() {
@@ -990,23 +1057,117 @@ class GameScene extends Phaser.Scene {
     t.setScale(0.2).setAlpha(0); this.tweens.add({ targets: t, scale: 1, alpha: 1, duration: 500, ease: 'Back.out' });
     const s = this.txt(W / 2, H / 2 + 50, 'Счёт: ' + this.score, 30, '#ffffff', { o: [0.5, 0.5], st: 5, depth: 111 });
     s.setAlpha(0); this.tweens.add({ targets: s, alpha: 1, duration: 500, delay: 300 });
-    if (this.newRecord && this.score > this.startBest) {
-      const r = this.txt(W / 2, H / 2 + 96, '★ НОВЫЙ РЕКОРД ★', 20, '#ffd34a', { o: [0.5, 0.5], st: 4, depth: 111 });
-      this.tweens.add({ targets: r, scale: 1.12, yoyo: true, repeat: -1, duration: 400 });
-    }
     this.time.delayedCall(2000, () => sendScoreAndClose());
   }
 
-  // ------------------------------------------------------------------ BOSS
+  // ------------------------------------------------------------------ BOSS & ATTACKS
+  spawnBossProj(x, y, vx, vy, tex, opts) {
+    if (this.gs !== 'playing' || !this.boss) return null;
+    opts = opts || {};
+    const pr = this.add.image(x, y, tex).setScale((opts.scale || 1) / TS).setDepth(3.8);
+    pr.vx = vx; pr.vy = vy;
+    pr.hw = opts.hw || 8.5; pr.hh = opts.hh || 8.5;
+    pr.spin = opts.spin || 0;
+    pr.sway = opts.sway || 0;
+    pr.ph = opts.ph || 0;
+    pr.splitY = opts.splitY || 0;
+    if (opts.orient) pr.rotation = Math.atan2(vx, vy);
+    this.bossBullets.push(pr);
+    return pr;
+  }
+
+  bossAttack(bo) {
+    if (!bo || !bo.active || this.gs !== 'playing') return;
+    const lv = this.level, W = this.W, H = this.H, p = this.player;
+    const bx = bo.x, by = bo.y + 24;
+    const baseSpd = 195 + lv * 14;
+    bo.atkStep = (bo.atkStep || 0) + 1;
+
+    // Визуальная отдача босса при атаке
+    const baseSc = 100 / (120 * TS);
+    this.tweens.add({ targets: bo, scaleX: baseSc * 1.14, scaleY: baseSc * 0.9, duration: 130, yoyo: true, ease: 'Sine.easeOut' });
+    Aud.play('boss_shot');
+
+    if (lv === 1) {
+      // 1. ВЗРЫВНОЙ УРАГАН: разрывная шаровая молния, распадающаяся в полёте на 5 искр
+      this.ringFx(bx, by, 0xffe14a, 65);
+      this.spawnBossProj(bx, by, 0, baseSpd * 0.85, 'bproj_bolt', {
+        scale: 1.15, hw: 10, hh: 10, spin: 5, splitY: Math.min(H * 0.44, by + 135)
+      });
+    } else if (lv === 2) {
+      // 2. ШТОРМОВОЙ ВИХРЬ: 3 вихревых сгустка с мягкой волнообразной траекторией
+      this.ringFx(bx, by, 0x9fe8ff, 70);
+      const count = 3, spread = 46 * Math.PI / 180;
+      for (let i = 0; i < count; i++) {
+        const a = (i / (count - 1) - 0.5) * spread;
+        this.spawnBossProj(bx, by, Math.sin(a) * baseSpd, Math.cos(a) * baseSpd, 'bproj_wind', {
+          spin: 7, sway: 55, ph: i * 1.4
+        });
+      }
+    } else if (lv === 3) {
+      // 3. ЗАТМЕНИЕ: лёгкая вспышка сумерек + веер огненной короны в сторону Солнца
+      this.flashVig(this.vigDark, 0.38, 1200);
+      this.ringFx(bx, by, 0xff8a2a, 80);
+      const aim = Phaser.Math.Clamp(Math.atan2(p.x - bx, Math.max(90, p.y - by)), -0.45, 0.45);
+      const count = bo.atkStep % 2 === 1 ? 3 : 4;
+      const stepA = 25 * Math.PI / 180;
+      for (let i = 0; i < count; i++) {
+        const a = aim + (i - (count - 1) / 2) * stepA;
+        this.spawnBossProj(bx, by, Math.sin(a) * baseSpd, Math.cos(a) * baseSpd, 'bproj_eclipse', { spin: 4 });
+      }
+    } else if (lv === 4) {
+      // 4. ЛЕДЯНОЙ ГИГАНТ: чередует веер из 3 сосулек и «ледяной град» сверху с предупреждением
+      this.ringFx(bx, by, 0x9fe8ff, 80);
+      if (bo.atkStep % 2 === 1) {
+        const aim = Phaser.Math.Clamp(Math.atan2(p.x - bx, Math.max(90, p.y - by)), -0.4, 0.4);
+        for (let i = -1; i <= 1; i++) {
+          const a = aim + i * 0.34;
+          this.spawnBossProj(bx, by, Math.sin(a) * (baseSpd + 15), Math.cos(a) * (baseSpd + 15), 'bproj_ice', { orient: true });
+        }
+      } else {
+        const shift = Phaser.Math.Between(-28, 28);
+        [W * 0.22 + shift, W * 0.5 + shift * 0.5, W * 0.78 + shift].forEach((ix, idx) => {
+          const cx = Phaser.Math.Clamp(ix, 36, W - 36);
+          const warn = this.add.image(cx, TOP + 42, 'spark').setTint(0x9fe8ff).setScale(0.75 / TS).setDepth(30);
+          this.tweens.add({
+            targets: warn, scale: 1.35 / TS, alpha: 0, duration: 450, delay: idx * 90,
+            onComplete: () => {
+              warn.destroy();
+              this.spawnBossProj(cx, TOP + 38, 0, baseSpd + 10, 'bproj_ice', { orient: true });
+            }
+          });
+        });
+      }
+    } else if (lv === 5) {
+      // 5. ЧЁРНАЯ ДЫРА: мягкий импульс притяжения + дуга из 4-5 сфер антиматерии
+      const r = this.add.image(bo.x, bo.y, 'ring_fx').setTint(0xff55ff).setBlendMode('ADD').setScale(2.8 / TS).setAlpha(0.75).setDepth(3.7);
+      this.tweens.add({ targets: r, scale: 0.3 / TS, alpha: 0, duration: 650, ease: 'Sine.easeIn', onComplete: () => r.destroy() });
+      this.pullUntil = this.time.now + 1100;
+      const count = bo.atkStep % 2 === 1 ? 4 : 5;
+      const spread = 88 * Math.PI / 180;
+      for (let i = 0; i < count; i++) {
+        const a = (i / (count - 1) - 0.5) * spread;
+        this.spawnBossProj(bx, by, Math.sin(a) * baseSpd, Math.cos(a) * baseSpd, 'bproj_void', { spin: 6 });
+      }
+    }
+  }
+
   prepareBoss() {
     if (this.bossActive || this.gs !== 'playing' || this.level > 5) return;
     const lv = this.level, cfg = CFG.LEVELS[lv], W = this.W;
+    if (this.bossTimer) this.bossTimer.paused = true;
     this.bossInv = true; this.time.delayedCall(CFG.BOSS_INTRO_MS, () => { this.bossInv = false; });
     this.bossActive = true; this.warned = false; this.vigWarn.setAlpha(0);
     const b = this.add.image(W / 2, -100, 'boss' + lv).setScale(100 / (120 * TS)).setDepth(4);
-    b.maxHp = CFG.BOSS_HP_BASE + lv * CFG.BOSS_HP_PER_LEVEL; b.hp = b.maxHp; b.hw = 33; b.hh = 33; b.born = this.time.now;
+
+    // Вариант А: Адаптивное ХП от текущей раскачки игрока (dmg и mult)
+    const effectiveVolley = this.dmg * (1 + (this.mult - 1) * 0.75);
+    b.maxHp = Math.max(CFG.BOSS_MIN_HP[lv], Math.round(effectiveVolley * CFG.BOSS_VOLLEYS[lv]));
+    b.hp = b.maxHp; b.hw = 42; b.hh = 42; b.born = this.time.now;
+    b.nextAtk = this.time.now + CFG.BOSS_INTRO_MS + 800; b.atkStep = 0;
+
     this.boss = b; this.bossTrail = b.hp;
-    this.bossAura = this.add.image(b.x, b.y, 'glow').setTint(cfg.bossTint).setBlendMode('ADD').setDepth(3.5).setAlpha(0.6);
+    this.bossAura = this.add.image(b.x, b.y, 'glow').setTint(cfg.bossTint).setBlendMode('ADD').setDepth(3.5).setAlpha(0.25);
     this.bossEm = this.add.particles(0, 0, 'dot', {
       frequency: 40, lifespan: 700, speed: { min: 20, max: 80 }, scale: { start: 0.5, end: 0 }, alpha: { start: 0.8, end: 0 },
       tint: cfg.bossTint, blendMode: 'ADD', emitZone: { type: 'random', source: new Phaser.Geom.Circle(0, 0, 44) }
@@ -1016,14 +1177,16 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.flash(300, 90, 0, 120); this.shake(500, 0.006);
   }
   hitBoss(b, bl) {
-    b.hp--;
+    const d = bl.isGreen ? Math.max(1, Math.round(this.dmg * 0.55)) : this.dmg;
+    b.hp -= d;
     Aud.play('hit'); this.flash(b);
-    this.popText(b.x + 30, b.y - 30, '-1', { size: 20, color: '#ff4040', st: 4, rise: 28, hold: 80, dur: 380 }); // реальный урон = 1
+    this.popText(b.x + Phaser.Math.Between(-24, 28), b.y - 28, '-' + d, { size: 20, color: '#ff4040', st: 4, rise: 28, hold: 80, dur: 380 });
     this.burst('spark', bl.x, bl.y, 4);
     if (b.hp <= 0) this.killBoss();
   }
   killBoss() {
     const b = this.boss, bx = b.x, by = b.y;
+    this.clearBossBullets();
     this.destroyBoss();
     for (let i = 0; i < 7; i++) this.time.delayedCall(i * 90, () => { const ox = bx + Phaser.Math.Between(-40, 40), oy = by + Phaser.Math.Between(-40, 40); this.burst('boom', ox, oy, 18); this.burst('spark', ox, oy, 10); this.ringFx(ox, oy, 0xffd34a, 140); });
     this.burst('gold', bx, by, 40);
@@ -1031,19 +1194,25 @@ class GameScene extends Phaser.Scene {
     this.slowUntil = performance.now() + 380;
     this.popText(bx, by, '+' + CFG.SCORE_BOSS, { size: 40, color: '#ffe14a', st: 7, rise: 60, hold: 500, dur: 700 });
     hap('notificationOccurred', 'success');
-    this.bossActive = false;
     this.addScore(CFG.SCORE_BOSS);
-    if (this.lives < CFG.MAX_LIVES) { this.lives++; this.updateLives(true); }
+    if (this.lives < CFG.MAX_LIVES) { this.lives++; this.updateLives(); }
     if (this.level < 5) {
       Aud.play('boss_win');
       this.level++; this.levelTxt.setText('УРОВЕНЬ ' + this.level);
       this.setLevelBG(this.level, false);
-      if (this.bossTimer) { this.bossTimer.remove(); this.bossTimer = this.time.addEvent({ delay: CFG.BOSS_MS, callback: this.prepareBoss, callbackScope: this, loop: true }); }
       this.bossActive = true;
-      this.time.delayedCall(CFG.POST_BOSS_PAUSE_MS, () => { this.bossActive = false; });
+      if (this.bossTimer) { this.bossTimer.remove(); this.bossTimer = null; }
+      this.time.delayedCall(CFG.POST_BOSS_PAUSE_MS, () => {
+        if (this.gs !== 'playing') return;
+        this.bossActive = false;
+        this.bossTimer = this.time.addEvent({ delay: CFG.BOSS_MS, callback: this.prepareBoss, callbackScope: this, loop: true });
+      });
       Music.set('play', baseBpm(this.level));
       this.time.delayedCall(700, () => { if (this.gs === 'playing') this.popText(this.W / 2, this.H * 0.4, CFG.LEVELS[this.level].name.toUpperCase(), { size: 26, color: '#ffffff', st: 6, rise: 20, hold: 1500, dur: 600 }); });
-    } else this.startEnding();
+    } else {
+      this.bossActive = false;
+      this.startEnding();
+    }
   }
 
   // ------------------------------------------------------------------ UPDATE
@@ -1058,12 +1227,19 @@ class GameScene extends Phaser.Scene {
     if (this.gs !== 'playing') return;
     const W = this.W, H = this.H, p = this.player;
 
+    // мягкое притяжение Чёрной Дыры (только во время гравитационного импульса на 5 уровне)
+    if (this.boss && this.time.now < this.pullUntil) {
+      const dx = this.boss.x - p.x, dy = this.boss.y - p.y, len = Math.hypot(dx, dy) || 1;
+      this.tx = Phaser.Math.Clamp(this.tx + (dx / len) * 32 * dt, 20, W - 20);
+      this.ty = Phaser.Math.Clamp(this.ty + (dy / len) * 38 * dt, Math.max(260, TOP + 240), H - 20);
+    }
+
     // игрок
     const k = 1 - Math.exp(-dt * 28);
     p.x += (this.tx - p.x) * k; p.y += (this.ty - p.y) * k;
     this.trail.setPosition(p.x, p.y + 12);
 
-    // пули
+    // пули игрока
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i]; b.x += b.vx * dt; b.y += b.vy * dt;
       if (b.y < -100 || b.x < -100 || b.x > W + 100) { b.destroy(); this.bullets.splice(i, 1); }
@@ -1074,7 +1250,34 @@ class GameScene extends Phaser.Scene {
       if (e.y > H + 50) { this.removeEnemy(e); continue; }
       if (!this.invuln && ov(p, e)) { this.onPlayerHit(e); if (this.gs !== 'playing') return; }
     }
-    // пули ↔ враги
+    // снаряды боссов
+    for (let i = this.bossBullets.length - 1; i >= 0; i--) {
+      const bb = this.bossBullets[i];
+      bb.x += bb.vx * dt; bb.y += bb.vy * dt;
+      if (bb.sway) bb.x += Math.sin(this.t * 5.5 + bb.ph) * bb.sway * dt;
+      if (bb.spin) bb.rotation += bb.spin * dt;
+      // разрыв шаровой молнии 1-го босса
+      if (bb.splitY && bb.y >= bb.splitY) {
+        const sx = bb.x, sy = bb.y;
+        bb.destroy(); this.bossBullets.splice(i, 1);
+        this.ringFx(sx, sy, 0xffe14a, 75); this.burst('spark', sx, sy, 10); Aud.play('hit');
+        for (let k = -2; k <= 2; k++) {
+          const a = k * 0.44;
+          this.spawnBossProj(sx, sy, Math.sin(a) * 195, Math.cos(a) * 195, 'bproj_spark', { hw: 7, hh: 7, spin: 6 });
+        }
+        continue;
+      }
+      if (bb.y > H + 60 || bb.y < -80 || bb.x < -60 || bb.x > W + 60) {
+        bb.destroy(); this.bossBullets.splice(i, 1); continue;
+      }
+      if (!this.invuln && ov(p, bb)) {
+        this.burst('spark', bb.x, bb.y, 8);
+        bb.destroy(); this.bossBullets.splice(i, 1);
+        this.onPlayerHit(null);
+        if (this.gs !== 'playing') return;
+      }
+    }
+    // пули ↔ враги и босс
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i]; let used = false;
       for (let j = this.enemies.length - 1; j >= 0; j--) {
@@ -1092,15 +1295,21 @@ class GameScene extends Phaser.Scene {
       if (b.y > H + 50) { this.removeBonus(b); continue; }
       if (ov(p, b)) this.collectBonus(b);
     }
-    // босс
+    // босс (траектория ниже шапки HUD + периодические атаки)
     const bo = this.boss;
     if (bo) {
       const now = this.time.now, kk = Math.min(1, (now - bo.born) / CFG.BOSS_INTRO_MS), L = this.level;
-      bo.x = W / 2 + Math.sin(now / 500) * (60 + L * 15);
-      bo.y = Phaser.Math.Linear(-100, 150 + Math.cos(now / 800) * (40 + L * 10), Phaser.Math.Easing.Back.Out(kk));
+      const maxX = Math.max(40, W / 2 - 55);
+      bo.x = W / 2 + Math.sin(now / 500) * Math.min(60 + L * 12, maxX);
+      const targetY = (TOP + 175) + Math.cos(now / 800) * (25 + L * 4);
+      bo.y = Phaser.Math.Linear(-100, targetY, Phaser.Math.Easing.Back.Out(kk));
       bo.alpha = this.bossInv ? 0.5 + Math.sin(Date.now() / 100) * 0.5 : 1;
-      this.bossAura.setPosition(bo.x, bo.y).setDisplaySize(230 + 20 * Math.sin(this.t * 3), 230 + 20 * Math.sin(this.t * 3)).setAlpha(0.45 * bo.alpha);
+      this.bossAura.setPosition(bo.x, bo.y).setDisplaySize(210 + 18 * Math.sin(this.t * 3), 210 + 18 * Math.sin(this.t * 3)).setAlpha(0.25 * bo.alpha);
       this.bossEm.setPosition(bo.x, bo.y);
+      if (!this.bossInv && now >= bo.nextAtk) {
+        this.bossAttack(bo);
+        bo.nextAtk = now + (2400 - L * 90);
+      }
       if (!this.bossInv && !this.invuln && ov(p, bo)) this.onPlayerHit(null);
     }
     // предупреждение о боссе
@@ -1114,7 +1323,7 @@ class GameScene extends Phaser.Scene {
   startEnding() {
     this.gs = 'ending';
     if (this.spawnTimer) this.spawnTimer.remove(); if (this.bossTimer) this.bossTimer.remove();
-    this.clearEntities(); this.trail.stop(); this.rain.stop(); this.vigWarn.setAlpha(0);
+    this.clearEntities(); this.trail.stop(); this.rain.stop(); this.vigWarn.setAlpha(0); this.vigDark.setAlpha(0);
     Aud.play('boss5_win'); Music.set('dark', 72);
     this.setSunTex('sun_happy'); this.player.alpha = 1;
     const W = this.W, H = this.H;
@@ -1205,7 +1414,7 @@ document.getElementById('btnExit').addEventListener('click', () => {
   s.scene.pause(); dlg.classList.add('show');
 });
 document.getElementById('dlgNo').addEventListener('click', () => { dlg.classList.remove('show'); const s = scn(); if (s) s.scene.resume(); });
-document.getElementById('dlgYes').addEventListener('click', () => { dlg.classList.remove('show'); const s = scn(); if (s) s.scene.resume(); sendScoreAndClose(); });
+document.getElementById('dlgYes').addEventListener('click', () => { dlg.classList.remove('show'); sendScoreAndClose(); });
 
 // ---------- аудио стартует по первому касанию ----------
 const unlock = () => {
