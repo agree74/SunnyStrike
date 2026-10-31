@@ -39,7 +39,7 @@
     background: #0a1426; color: #fff; font: 600 18px var(--font); padding: 24px; }
   @media (orientation: landscape) and (max-height: 520px) { #rot { display: flex; } }
 </style>
-</head>
+<script src="/_aistudio-iframe.js?v=1f94f900"></script></head>
 <body>
 <div id="game-container"></div>
 
@@ -62,6 +62,7 @@
 // TELEGRAM (с заглушкой, чтобы игру можно было открыть и в обычном браузере)
 // ============================================================================
 const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : {
+  initData: '', initDataUnsafe: {},
   ready() {}, expand() {}, close() { console.log('[tg.close]'); },
   sendData(d) { console.log('[tg.sendData]', d); }, HapticFeedback: null
 };
@@ -110,7 +111,7 @@ const baseBpm = (lv) => 108 + lv * 6;
 const TAU = Math.PI * 2;
 const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
-const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+const lsSet = (k) => { try { localStorage.setItem(k, arguments[1]); } catch (e) {} };
 const hex = (c) => '#' + c.toString(16).padStart(6, '0');
 const rnd = (seed) => { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
 const ov = (a, b) => Math.abs(a.x - b.x) < a.hw + b.hw && Math.abs(a.y - b.y) < a.hh + b.hh;
@@ -126,13 +127,48 @@ const TOP = 10 + SAFE_TOP;
 const TS = 2; // масштаб процедурных текстур
 
 // ============================================================================
-// ПЕРЕДАЧА ОЧКОВ В ТЕЛЕГРАМ
+// УНИВЕРСАЛЬНАЯ ПЕРЕДАЧА ОЧКОВ В ТЕЛЕГРАМ (Reply-кнопка + MenuButton / Inline)
 // ============================================================================
-function sendScoreAndClose() {
-  if (sent) return; sent = true;
+const API_SAVE_SCORE_URL = 'https://agree74.pythonanywhere.com/api/save_score';
+
+async function sendScoreAndClose() {
+  if (sent) return;
+  sent = true;
+
   const score = sceneRef ? sceneRef.score : 0;
-  try { if (tg.sendData) tg.sendData(String(score)); } catch (e) {}
-  setTimeout(() => { try { tg.close(); } catch (e) {} }, 1000);
+  const webApp = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : tg;
+  const initData = (webApp && typeof webApp.initData === 'string') ? webApp.initData.trim() : '';
+
+  // Сценарий Б: Игра запущена через синюю кнопку MenuButton или Inline-кнопку (initData НЕ пустая)
+  if (initData) {
+    try {
+      await fetch(API_SAVE_SCORE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          initData: initData,
+          score: score
+        })
+      });
+    } catch (err) {
+      console.error('Ошибка отправки очков на сервер:', err);
+    } finally {
+      try { webApp.close(); } catch (e) {}
+    }
+    return;
+  }
+
+  // Сценарий А: Игра запущена с нижней Reply-кнопки (initData пустая строка)
+  try {
+    if (webApp && webApp.sendData) {
+      webApp.sendData(String(score));
+    }
+  } catch (e) {
+    console.error('Ошибка вызова sendData:', e);
+  }
+  setTimeout(() => {
+    try { webApp.close(); } catch (e) {}
+  }, 1000);
 }
 
 // ============================================================================
@@ -831,13 +867,12 @@ class GameScene extends Phaser.Scene {
   }
   setSunTex(key) { this.sunTex = key; this.player.setTexture(key); }
 
-  // ------------------------------------------------------------------ HUD (без фоновых плашек, с чётким контуром)
+  // ------------------------------------------------------------------ HUD
   buildHUD() {
     const W = this.W, hud = this.hudObjs = [];
     const LX = 12, RX = W - 12;
     const T_ = (x, y, s, size, col, o) => { const t = this.txt(x, y, s, size, col, o); hud.push(t); return t; };
 
-    // Левый блок: Очки, Уровень, Жизни
     T_(LX, TOP + 6, 'ОЧКИ', 11, '#ffe9a8', { st: 3.5, o: [0, 0.5] });
     this.scoreTxt = T_(LX, TOP + 26, '0', 24, '#ffffff', { st: 4.5, o: [0, 0.5] });
     this.levelTxt = T_(LX, TOP + 48, 'УРОВЕНЬ 1', 12, '#ffff7a', { st: 3.5, o: [0, 0.5] });
@@ -850,12 +885,10 @@ class GameScene extends Phaser.Scene {
       this.hearts.push(f);
     }
 
-    // Правый блок: Урон, Пули, Тройной огонь
     this.dmgTxt = T_(RX, TOP + 10, 'УРОН 1', 13, '#ffa04a', { st: 3.5, o: [1, 0.5] });
     this.multTxt = T_(RX, TOP + 30, 'ПУЛИ ×1', 13, '#8fe8ff', { st: 3.5, o: [1, 0.5] });
     this.greenTxt = T_(RX, TOP + 50, 'ТРОЙНОЙ ОГОНЬ', 11, '#9bff9b', { st: 3.5, o: [1, 0.5] }).setVisible(false);
 
-    // Верхний центр: Имя босса и полоска его ХП
     this.bossNameTxt = T_(W / 2, TOP + 8, '', 12, '#ffffff', { o: [0.5, 0.5], st: 4 }).setVisible(false);
     this.hudDyn = this.add.graphics().setDepth(101); hud.push(this.hudDyn);
   }
@@ -880,14 +913,12 @@ class GameScene extends Phaser.Scene {
     const g = this.hudDyn, W = this.W; g.clear();
     if (this.gs !== 'playing') { this.greenTxt.setVisible(false); this.bossNameTxt.setVisible(false); return; }
 
-    // тонкий индикатор до появления босса на самом верху
     if (!this.bossActive && this.bossTimer) {
       const f = Phaser.Math.Clamp(1 - this.bossTimer.getRemaining() / CFG.BOSS_MS, 0, 1);
       g.fillStyle(0xffffff, 0.14); g.fillRect(0, SAFE_TOP, W, 3);
       g.fillStyle(this.warned ? 0xff4a4a : 0xb98cff, 0.95); g.fillRect(0, SAFE_TOP, W * f, 3);
     }
 
-    // полоска таймера зелёного бонуса под надписью «ТРОЙНОЙ ОГОНЬ»
     const left = this.greenUntil - this.time.now;
     if (left > 0) {
       const gw = 88, gx = W - 12 - gw, gy = TOP + 61, gh = 6;
@@ -896,7 +927,6 @@ class GameScene extends Phaser.Scene {
       this.greenTxt.setVisible(true);
     } else this.greenTxt.setVisible(false);
 
-    // имя босса и полоска ХП на самом верху по центру
     const b = this.boss;
     if (b) {
       const bw = Math.min(190, W - 164), bx = W / 2 - bw / 2, by = TOP + 20, bh = 10;
@@ -1083,19 +1113,16 @@ class GameScene extends Phaser.Scene {
     const baseSpd = 195 + lv * 14;
     bo.atkStep = (bo.atkStep || 0) + 1;
 
-    // Визуальная отдача босса при атаке
     const baseSc = 100 / (120 * TS);
     this.tweens.add({ targets: bo, scaleX: baseSc * 1.14, scaleY: baseSc * 0.9, duration: 130, yoyo: true, ease: 'Sine.easeOut' });
     Aud.play('boss_shot');
 
     if (lv === 1) {
-      // 1. ВЗРЫВНОЙ УРАГАН: разрывная шаровая молния, распадающаяся в полёте на 5 искр
       this.ringFx(bx, by, 0xffe14a, 65);
       this.spawnBossProj(bx, by, 0, baseSpd * 0.85, 'bproj_bolt', {
         scale: 1.15, hw: 10, hh: 10, spin: 5, splitY: Math.min(H * 0.44, by + 135)
       });
     } else if (lv === 2) {
-      // 2. ШТОРМОВОЙ ВИХРЬ: 3 вихревых сгустка с мягкой волнообразной траекторией
       this.ringFx(bx, by, 0x9fe8ff, 70);
       const count = 3, spread = 46 * Math.PI / 180;
       for (let i = 0; i < count; i++) {
@@ -1105,7 +1132,6 @@ class GameScene extends Phaser.Scene {
         });
       }
     } else if (lv === 3) {
-      // 3. ЗАТМЕНИЕ: лёгкая вспышка сумерек + веер огненной короны в сторону Солнца
       this.flashVig(this.vigDark, 0.38, 1200);
       this.ringFx(bx, by, 0xff8a2a, 80);
       const aim = Phaser.Math.Clamp(Math.atan2(p.x - bx, Math.max(90, p.y - by)), -0.45, 0.45);
@@ -1116,7 +1142,6 @@ class GameScene extends Phaser.Scene {
         this.spawnBossProj(bx, by, Math.sin(a) * baseSpd, Math.cos(a) * baseSpd, 'bproj_eclipse', { spin: 4 });
       }
     } else if (lv === 4) {
-      // 4. ЛЕДЯНОЙ ГИГАНТ: чередует веер из 3 сосулек и «ледяной град» сверху с предупреждением
       this.ringFx(bx, by, 0x9fe8ff, 80);
       if (bo.atkStep % 2 === 1) {
         const aim = Phaser.Math.Clamp(Math.atan2(p.x - bx, Math.max(90, p.y - by)), -0.4, 0.4);
@@ -1139,7 +1164,6 @@ class GameScene extends Phaser.Scene {
         });
       }
     } else if (lv === 5) {
-      // 5. ЧЁРНАЯ ДЫРА: мягкий импульс притяжения + дуга из 4-5 сфер антиматерии
       const r = this.add.image(bo.x, bo.y, 'ring_fx').setTint(0xff55ff).setBlendMode('ADD').setScale(2.8 / TS).setAlpha(0.75).setDepth(3.7);
       this.tweens.add({ targets: r, scale: 0.3 / TS, alpha: 0, duration: 650, ease: 'Sine.easeIn', onComplete: () => r.destroy() });
       this.pullUntil = this.time.now + 1100;
@@ -1160,7 +1184,6 @@ class GameScene extends Phaser.Scene {
     this.bossActive = true; this.warned = false; this.vigWarn.setAlpha(0);
     const b = this.add.image(W / 2, -100, 'boss' + lv).setScale(100 / (120 * TS)).setDepth(4);
 
-    // Вариант А: Адаптивное ХП от текущей раскачки игрока (dmg и mult)
     const effectiveVolley = this.dmg * (1 + (this.mult - 1) * 0.75);
     b.maxHp = Math.max(CFG.BOSS_MIN_HP[lv], Math.round(effectiveVolley * CFG.BOSS_VOLLEYS[lv]));
     b.hp = b.maxHp; b.hw = 42; b.hh = 42; b.born = this.time.now;
@@ -1227,36 +1250,30 @@ class GameScene extends Phaser.Scene {
     if (this.gs !== 'playing') return;
     const W = this.W, H = this.H, p = this.player;
 
-    // мягкое притяжение Чёрной Дыры (только во время гравитационного импульса на 5 уровне)
     if (this.boss && this.time.now < this.pullUntil) {
       const dx = this.boss.x - p.x, dy = this.boss.y - p.y, len = Math.hypot(dx, dy) || 1;
       this.tx = Phaser.Math.Clamp(this.tx + (dx / len) * 32 * dt, 20, W - 20);
       this.ty = Phaser.Math.Clamp(this.ty + (dy / len) * 38 * dt, Math.max(260, TOP + 240), H - 20);
     }
 
-    // игрок
     const k = 1 - Math.exp(-dt * 28);
     p.x += (this.tx - p.x) * k; p.y += (this.ty - p.y) * k;
     this.trail.setPosition(p.x, p.y + 12);
 
-    // пули игрока
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i]; b.x += b.vx * dt; b.y += b.vy * dt;
       if (b.y < -100 || b.x < -100 || b.x > W + 100) { b.destroy(); this.bullets.splice(i, 1); }
     }
-    // враги
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i]; e.y += e.vy * dt; e.angle = Math.sin(this.t * 3 + e.ph) * 5;
       if (e.y > H + 50) { this.removeEnemy(e); continue; }
       if (!this.invuln && ov(p, e)) { this.onPlayerHit(e); if (this.gs !== 'playing') return; }
     }
-    // снаряды боссов
     for (let i = this.bossBullets.length - 1; i >= 0; i--) {
       const bb = this.bossBullets[i];
       bb.x += bb.vx * dt; bb.y += bb.vy * dt;
       if (bb.sway) bb.x += Math.sin(this.t * 5.5 + bb.ph) * bb.sway * dt;
       if (bb.spin) bb.rotation += bb.spin * dt;
-      // разрыв шаровой молнии 1-го босса
       if (bb.splitY && bb.y >= bb.splitY) {
         const sx = bb.x, sy = bb.y;
         bb.destroy(); this.bossBullets.splice(i, 1);
@@ -1277,7 +1294,6 @@ class GameScene extends Phaser.Scene {
         if (this.gs !== 'playing') return;
       }
     }
-    // пули ↔ враги и босс
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i]; let used = false;
       for (let j = this.enemies.length - 1; j >= 0; j--) {
@@ -1288,14 +1304,12 @@ class GameScene extends Phaser.Scene {
       const bo = this.boss;
       if (bo && !this.bossInv && ov(b, bo)) { b.destroy(); this.bullets.splice(i, 1); this.hitBoss(bo, b); if (!this.boss) break; }
     }
-    // бонусы
     for (let i = this.bonuses.length - 1; i >= 0; i--) {
       const b = this.bonuses[i]; b.y += b.vy * dt; b.angle = Math.sin(this.t * 5 + b.ph) * 8;
       b.ring.setPosition(b.x, b.y).setScale((1 + 0.12 * Math.sin(this.t * 6 + b.ph)) / TS).setAlpha(0.6 + 0.3 * Math.sin(this.t * 6 + b.ph));
       if (b.y > H + 50) { this.removeBonus(b); continue; }
       if (ov(p, b)) this.collectBonus(b);
     }
-    // босс (траектория ниже шапки HUD + периодические атаки)
     const bo = this.boss;
     if (bo) {
       const now = this.time.now, kk = Math.min(1, (now - bo.born) / CFG.BOSS_INTRO_MS), L = this.level;
@@ -1312,7 +1326,6 @@ class GameScene extends Phaser.Scene {
       }
       if (!this.bossInv && !this.invuln && ov(p, bo)) this.onPlayerHit(null);
     }
-    // предупреждение о боссе
     if (!this.bossActive && this.bossTimer && this.level <= 5) {
       if (!this.warned && this.bossTimer.getRemaining() < 3000) { this.warned = true; Aud.play('warn'); Music.bpm += 14; }
       this.vigWarn.setAlpha(this.warned ? 0.16 + 0.14 * Math.sin(this.t * 9) : 0);
